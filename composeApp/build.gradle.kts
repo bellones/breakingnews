@@ -44,6 +44,8 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             //Navigation
             implementation(libs.compose.navigation)
+            // Coil
+            implementation(libs.landscapist.coil3)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -54,6 +56,11 @@ kotlin {
 android {
     namespace = "com.thiago.android.breakingnews"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
+
+    //Folder redirect to the common main resourses
+    sourceSets["main"].manifest.srcFile("src/androidMain/AndroidManifest.xml")
+    sourceSets["main"].res.srcDirs("src/commonMain/resources", "src/androidMain/res")
+    sourceSets["main"].resources.srcDirs("src/commonMain/resources")
 
     defaultConfig {
         applicationId = "com.thiago.android.breakingnews"
