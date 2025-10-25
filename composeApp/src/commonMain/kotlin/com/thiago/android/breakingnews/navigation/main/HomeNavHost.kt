@@ -6,6 +6,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import com.thiago.android.breakingnews.features.about.AboutScreen
+import com.thiago.android.breakingnews.features.details.DetailsScreen
 import com.thiago.android.breakingnews.features.home.HomeScreen
 import com.thiago.android.breakingnews.navigation.routes.HomeRoutes
 
@@ -29,8 +30,19 @@ fun HomeNavHost(
         }
         composable<HomeRoutes.Home> {
             HomeScreen(
+                navigateToDetails = {
+                    navHostController.navigate(HomeRoutes.Details)
+                },
                 navigateToAbout =  {
                     navHostController.navigate(HomeRoutes.About)
+                }
+            )
+        }
+
+        composable<HomeRoutes.Details> {
+            DetailsScreen(
+                onBackPress = {
+                    navHostController.popBackStack()
                 }
             )
         }

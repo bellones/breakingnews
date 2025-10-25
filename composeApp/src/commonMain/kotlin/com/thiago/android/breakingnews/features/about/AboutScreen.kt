@@ -18,7 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.thiago.android.breakingnews.Platform
+import com.thiago.android.breakingnews.platform.Platform
 import org.jetbrains.compose.ui.tooling.preview.Preview
 
 
