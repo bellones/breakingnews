@@ -1,0 +1,23 @@
+{
+  "DVTSourceControlWorkspaceBlueprintPrimaryRemoteRepositoryKey" : "4AD034E5F243AEB57C7D73D6BFBE9CFB53B8FE36",
+  "DVTSourceControlWorkspaceBlueprintWorkingCopyRepositoryLocationsKey" : {
+
+  },
+  "DVTSourceControlWorkspaceBlueprintWorkingCopyStatesKey" : {
+    "4AD034E5F243AEB57C7D73D6BFBE9CFB53B8FE36" : 0
+  },
+  "DVTSourceControlWorkspaceBlueprintIdentifierKey" : "054D5B95-1EF3-4732-A3EC-8C32427FE33D",
+  "DVTSourceControlWorkspaceBlueprintWorkingCopyPathsKey" : {
+    "4AD034E5F243AEB57C7D73D6BFBE9CFB53B8FE36" : "breakingnews\/"
+  },
+  "DVTSourceControlWorkspaceBlueprintNameKey" : "iosApp",
+  "DVTSourceControlWorkspaceBlueprintVersion" : 204,
+  "DVTSourceControlWorkspaceBlueprintRelativePathToProjectKey" : "iosApp\/iosApp.xcodeproj",
+  "DVTSourceControlWorkspaceBlueprintRemoteRepositoriesKey" : [
+    {
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryURLKey" : "https:\/\/github.com\/bellones\/breakingnews.git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositorySystemKey" : "com.apple.dt.Xcode.sourcecontrol.Git",
+      "DVTSourceControlWorkspaceBlueprintRemoteRepositoryIdentifierKey" : "4AD034E5F243AEB57C7D73D6BFBE9CFB53B8FE36"
+    }
+  ]
+}
