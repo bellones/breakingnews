@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import breakingnews.composeapp.generated.resources.Res
 import breakingnews.composeapp.generated.resources.breaking_news_logo
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil3.CoilImage
 import org.jetbrains.compose.resources.painterResource
 
 @Composable
@@ -34,7 +36,7 @@ fun BreakingNewsCard(
     title: String,
     author: String,
     data: String,
-    imagePainter : Painter = painterResource(Res.drawable.breaking_news_logo),
+    imageUrl : String? = null,
     onClick : () -> Unit
 
 ) {
@@ -53,13 +55,17 @@ fun BreakingNewsCard(
 
         Box{
 
-            Image(
-                painter = imagePainter,
-                null,
+            CoilImage(
+                imageModel = {
+                        imageUrl
+                    },
                 modifier = modifier.fillMaxSize().graphicsLayer( {
                     alpha = 0.7f
                 }),
-                contentScale = ContentScale.Crop)
+                imageOptions = ImageOptions(
+                    contentScale = ContentScale.Crop
+                )
+            )
 
 
         Column (

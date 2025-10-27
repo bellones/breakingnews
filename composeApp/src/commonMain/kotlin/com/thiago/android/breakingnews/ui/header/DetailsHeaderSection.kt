@@ -24,20 +24,25 @@ import breakingnews.composeapp.generated.resources.breaking_news_logo
 import org.jetbrains.compose.resources.painterResource
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import com.skydoves.landscapist.ImageOptions
+import com.skydoves.landscapist.coil3.CoilImage
 
 @Composable
 fun DetailsHeaderSection(
     modifier: Modifier = Modifier,
-    imagePainter : Painter = painterResource(Res.drawable.breaking_news_logo),
+    imageUrl : String,
     onClick: () -> Unit
 ) {
     Box{
-        Image(
-            painter = imagePainter,
-            null,
-            modifier = modifier.fillMaxWidth().height(250.dp),
-            contentScale = ContentScale.Crop
+
+        CoilImage(
+            imageModel = {
+                imageUrl
+            },
+            modifier = modifier.fillMaxWidth().height(300.dp),
+            imageOptions = ImageOptions(contentScale = ContentScale.Crop)
         )
+
         Row(
             modifier = modifier.fillMaxWidth().padding(16.dp).clickable{
                 onClick.invoke()
