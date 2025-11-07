@@ -13,7 +13,6 @@ To facilitate development, testing, and demonstration of the Uplink SDKs, we nee
 - **Purpose**: Testing and demonstration of Uplink SDK features
 - **SDKs Integrated**:
   - UplinkCoreSDK (Core utilities, HTTP client, logging)
-  - UplinkPasspointProfileSDK (Passpoint profile management)
 
 ## Technical Implementation
 
@@ -24,20 +23,18 @@ To facilitate development, testing, and demonstration of the Uplink SDKs, we nee
 - **Project Type**: iOS Application (Xcode workspace)
 - **Dependencies**:
   - UplinkCoreSDK (via unified UplinkSDKiOS project)
-  - UplinkPasspointProfileSDK (via unified UplinkSDKiOS project)
   - SnapKit (~> 5.6.0) for UI layout
   - Alamofire (via UplinkCoreSDK SPM dependency)
 
 #### Features Implemented
-1. **Passpoint Profile Testing UI**
-   - Install Profile button
-   - List Profiles button
-   - Remove Profile button
-   - Validate Profile button
+1. **Core SDK Testing UI**
+   - HTTP client testing interface
+   - Logger testing interface
+   - Task scheduler testing interface
    - Status display area
 
 2. **Architecture**
-   - MVVM pattern with `PasspointViewModel`
+   - MVVM pattern with ViewModels
    - Programmatic UI using SnapKit
    - Async/await for SDK operations
 
@@ -49,9 +46,9 @@ To facilitate development, testing, and demonstration of the Uplink SDKs, we nee
 
 #### Key Files
 - `AppDelegate.swift` - Application entry point
-- `PasspointTestViewController.swift` - Main view controller
-- `PasspointTestView.swift` - UI layout
-- `PasspointViewModel.swift` - Business logic
+- `CoreSDKTestViewController.swift` - Main view controller
+- `CoreSDKTestView.swift` - UI layout
+- `CoreSDKViewModel.swift` - Business logic
 - `project.yml` - XcodeGen configuration
 - `Podfile` - CocoaPods dependencies
 
@@ -62,11 +59,12 @@ To facilitate development, testing, and demonstration of the Uplink SDKs, we nee
 - **Project Type**: Android Application (Gradle)
 - **Dependencies**:
   - UplinkCoreSDK (local module)
-  - UplinkPasspointProfileSDK (local module)
 
 #### Features Implemented
-1. **Passpoint Profile Testing UI**
-   - Similar functionality to iOS version
+1. **Core SDK Testing UI**
+   - HTTP client testing interface
+   - Logger testing interface
+   - Task scheduler testing interface
    - Material Design components
    - Kotlin coroutines for async operations
 
@@ -77,7 +75,7 @@ To facilitate development, testing, and demonstration of the Uplink SDKs, we nee
 
 #### Key Files
 - `MainActivity.kt` - Main activity
-- `PasspointViewModel.kt` - ViewModel
+- `CoreSDKViewModel.kt` - ViewModel
 - `activity_main.xml` - UI layout
 - `build.gradle` - Dependencies configuration
 
@@ -102,21 +100,19 @@ cd android
 
 ### Manual Testing
 1. Launch the Playground app on device/simulator
-2. Test each button functionality:
-   - **Install Profile**: Attempts to install a test Passpoint profile
-   - **List Profiles**: Lists all installed Passpoint profiles
-   - **Remove Profile**: Removes a profile by ID
-   - **Validate Profile**: Validates a profile's configuration
+2. Test Core SDK functionality:
+   - **HTTP Client**: Test HTTP requests (GET, POST, DELETE)
+   - **Logger**: Test logging functionality (debug, info, error)
+   - **Task Scheduler**: Test periodic task scheduling
 3. Verify status messages are displayed correctly
 4. Test error handling scenarios
 
 ### Test Scenarios
 - [ ] App launches successfully
 - [ ] UI elements are visible and properly laid out
-- [ ] Install Profile operation completes
-- [ ] List Profiles displays installed profiles
-- [ ] Remove Profile successfully removes a profile
-- [ ] Validate Profile shows validation results
+- [ ] HTTP client operations work correctly
+- [ ] Logger displays log messages appropriately
+- [ ] Task scheduler schedules and executes tasks
 - [ ] Error messages are displayed appropriately
 - [ ] App handles network errors gracefully
 - [ ] App works on both simulator/emulator and physical devices
@@ -126,8 +122,7 @@ cd android
 - [x] Playground app created for iOS
 - [x] Playground app created for Android
 - [x] Both apps integrate UplinkCoreSDK
-- [x] Both apps integrate UplinkPasspointProfileSDK
-- [x] UI provides buttons for all major SDK operations
+- [x] UI provides buttons for all major Core SDK operations
 - [x] Status/feedback is displayed to user
 - [x] Apps build successfully
 - [x] Apps run on simulators/emulators
@@ -149,11 +144,11 @@ cd android
 
 ## Notes
 
-- The iOS app uses a unified SDK project structure (UplinkSDKiOS) containing both SDK frameworks
+- The iOS app uses a unified SDK project structure (UplinkSDKiOS) containing the Core SDK framework
 - Framework embedding is handled automatically via build scripts
 - The Android app uses local module dependencies
 - Both implementations follow platform-specific best practices
-- The apps serve as reference implementations for SDK integration
+- The apps serve as reference implementations for Core SDK integration
 
 ## Related Issues
 - SDK development tickets
