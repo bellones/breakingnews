@@ -1,159 +1,309 @@
-# Create Playground App for Testing SDKs
+# Create SDK Scaffolding
 
 ## Summary
-Create a cross-platform Playground application for testing and demonstrating Uplink SDK functionality on both Android and iOS platforms.
+Establish the foundational project structure and scaffolding for Uplink SDKs across Android and iOS platforms, including core SDK modules, dependency management, build configurations, and project organization.
 
 ## Description
 
 ### Background
-To facilitate development, testing, and demonstration of the Uplink SDKs, we need a dedicated Playground application that allows developers to interact with SDK features in a controlled environment. This app serves as both a testing tool and a reference implementation.
+To support the development of modular SDKs for the Uplink platform, we need a well-organized, scalable project structure that:
+- Supports multiple SDK modules
+- Enables code sharing and dependency management
+- Follows platform-specific best practices
+- Facilitates easy integration and testing
+- Allows for future SDK expansion
 
 ### Scope
 - **Platforms**: Android and iOS
-- **Purpose**: Testing and demonstration of Uplink SDK features
-- **SDKs Integrated**:
-  - UplinkCoreSDK (Core utilities, HTTP client, logging)
+- **SDK Modules**: 
+  - Core SDK (shared utilities, HTTP client, logging)
+- **Project Organization**: Repository structure, build systems, dependency management
 
 ## Technical Implementation
 
-### iOS Implementation
+### Repository Structure
 
-#### Project Structure
-- **Location**: `ios/Playground/`
-- **Project Type**: iOS Application (Xcode workspace)
-- **Dependencies**:
-  - UplinkCoreSDK (via unified UplinkSDKiOS project)
-  - SnapKit (~> 5.6.0) for UI layout
-  - Alamofire (via UplinkCoreSDK SPM dependency)
-
-#### Features Implemented
-1. **Core SDK Testing UI**
-   - HTTP client testing interface
-   - Logger testing interface
-   - Task scheduler testing interface
-   - Status display area
-
-2. **Architecture**
-   - MVVM pattern with ViewModels
-   - Programmatic UI using SnapKit
-   - Async/await for SDK operations
-
-3. **Project Configuration**
-   - Xcode workspace with unified SDK project integration
-   - CocoaPods for dependency management
-   - Automatic framework embedding
-   - Build scripts for SDK framework integration
-
-#### Key Files
-- `AppDelegate.swift` - Application entry point
-- `CoreSDKTestViewController.swift` - Main view controller
-- `CoreSDKTestView.swift` - UI layout
-- `CoreSDKViewModel.swift` - Business logic
-- `project.yml` - XcodeGen configuration
-- `Podfile` - CocoaPods dependencies
+```
+uplink-sdks/
+├── android/
+│   ├── uplink-core-sdk/              # Core SDK module (Android Library)
+│   ├── playground/                    # Test/example application
+│   ├── build.gradle                   # Root build configuration
+│   ├── settings.gradle                # Module definitions
+│   └── gradle/                        # Gradle wrapper
+├── ios/
+│   ├── UplinkSDKiOS/                  # Unified SDK project (Xcode)
+│   │   ├── UplinkCoreSDK/            # Core SDK source
+│   │   └── UplinkSDKiOS.xcodeproj    # Xcode project
+│   └── Playground/                    # Test/example application
+└── docs/                              # Documentation
+```
 
 ### Android Implementation
 
 #### Project Structure
-- **Location**: `android/playground/`
-- **Project Type**: Android Application (Gradle)
-- **Dependencies**:
-  - UplinkCoreSDK (local module)
+- **Build System**: Gradle with Kotlin DSL
+- **Module Type**: Android Library (AAR)
+- **Language**: Kotlin
+- **Minimum SDK**: API 21 (Android 5.0)
 
-#### Features Implemented
-1. **Core SDK Testing UI**
-   - HTTP client testing interface
-   - Logger testing interface
-   - Task scheduler testing interface
-   - Material Design components
-   - Kotlin coroutines for async operations
+#### Core SDK Module (`uplink-core-sdk`)
+**Location**: `android/uplink-core-sdk/`
 
-2. **Architecture**
-   - MVVM pattern
-   - ViewBinding for UI
-   - Coroutines for async SDK calls
+**Components Created**:
+- `UplinkCoreClient.kt` - Main client class
+- `HttpClient.kt` - HTTP client implementation
+- `PeriodicTaskScheduler.kt` - Task scheduling utilities
+- `Logger.kt` - Logging utilities
+- `AndroidManifest.xml` - Module manifest
+- `build.gradle` - Module build configuration
+- `proguard-rules.pro` - ProGuard rules
 
-#### Key Files
-- `MainActivity.kt` - Main activity
-- `CoreSDKViewModel.kt` - ViewModel
-- `activity_main.xml` - UI layout
-- `build.gradle` - Dependencies configuration
+**Dependencies**:
+- Retrofit 2.x for HTTP networking
+- OkHttp for HTTP client
+- Kotlin Coroutines for async operations
+
+**Build Configuration**:
+```gradle
+- Library module configuration
+- ProGuard rules for release builds
+- Test source sets
+- Dependency declarations
+```
+
+#### Root Build Configuration
+**Files Created**:
+- `android/build.gradle` - Root build script
+- `android/settings.gradle` - Module inclusion
+- `android/gradle.properties` - Gradle properties
+- `android/gradle/wrapper/` - Gradle wrapper files
+
+**Features**:
+- Project setup supporting future modules
+- Dependency version management
+- Build optimization settings
+- Repository configurations
+
+### iOS Implementation
+
+#### Unified SDK Project Structure
+**Location**: `ios/UplinkSDKiOS/`
+
+**Project Type**: Xcode Framework Project
+**Configuration**: XcodeGen (project.yml)
+**Language**: Swift 5.9
+**Minimum iOS**: 13.0
+
+#### Core SDK Framework (`UplinkCoreSDK`)
+**Location**: `ios/UplinkSDKiOS/UplinkCoreSDK/`
+
+**Components Created**:
+- `UplinkCoreClient.swift` - Main client class
+- `HTTP/HttpClient.swift` - HTTP client implementation
+- `Periodic/PeriodicTaskScheduler.swift` - Task scheduling
+- `Utils/Logger.swift` - Logging utilities
+- `Models/` - Data models directory
+
+**Framework Configuration**:
+- Framework target type
+- Swift Package Manager for dependencies
+- Alamofire (~> 5.8) dependency
+- Module definition
+- Info.plist generation
+
+**Build Settings**:
+- Deployment target: iOS 13.0
+- Swift version: 5.9
+- Code signing: Automatic
+- Framework output configuration
+
+#### Project Generation
+**Configuration File**: `ios/UplinkSDKiOS/project.yml`
+
+**Features**:
+- XcodeGen project definition
+- Framework target definitions
+- Dependency management
+- Build scheme configuration
+- Swift Package Manager integration
+
+**Regeneration Command**:
+```bash
+cd ios/UplinkSDKiOS
+xcodegen generate
+```
+
+### Dependency Architecture
+
+#### Dependency Graph
+```
+Application
+└── uplink-core-sdk
+    └── (future SDKs will depend on core-sdk)
+```
+
+#### Key Principles
+- **Core SDK**: Shared utilities, HTTP client, logging
+- **Modularity**: SDK is independently buildable and testable
+- **Reusability**: Core SDK provides common functionality for future SDKs
+- **Extensibility**: Structure supports adding feature SDKs that depend on Core SDK
+
+### Build Systems
+
+#### Android
+- **Gradle**: Project structure supporting future modules
+- **Kotlin DSL**: Type-safe build scripts
+- **Gradle Wrapper**: Version-controlled build tool
+- **Build Variants**: Debug/Release configurations
+
+#### iOS
+- **Xcode**: Native IDE and build system
+- **XcodeGen**: Code-based project generation
+- **Swift Package Manager**: External dependencies
+- **CocoaPods**: Optional for app-level dependencies
+
+### Documentation Structure
+
+**Created**:
+- `README.md` - Repository overview and quick start
+- `ios/SETUP.md` - iOS-specific setup instructions
+- `ios/UplinkSDKiOS/README.md` - SDK project documentation
+- Code documentation (KDoc for Android, DocC for iOS)
 
 ## Build Instructions
 
-### iOS
-```bash
-cd ios/Playground
-pod install
-open Playground.xcworkspace
-# Build and run in Xcode
-```
-
 ### Android
 ```bash
+# Build all modules
 cd android
-./gradlew :playground:assembleDebug
-# Install on device/emulator
+./gradlew build
+
+# Build individual module
+./gradlew :uplink-core-sdk:build
+
+# Generate AAR file
+./gradlew :uplink-core-sdk:assembleRelease
+```
+
+### iOS
+```bash
+# Generate Xcode project
+cd ios/UplinkSDKiOS
+xcodegen generate
+
+# Build framework
+xcodebuild -project UplinkSDKiOS.xcodeproj -scheme UplinkCoreSDK -sdk iphonesimulator build
 ```
 
 ## Testing Instructions
 
-### Manual Testing
-1. Launch the Playground app on device/simulator
-2. Test Core SDK functionality:
-   - **HTTP Client**: Test HTTP requests (GET, POST, DELETE)
-   - **Logger**: Test logging functionality (debug, info, error)
-   - **Task Scheduler**: Test periodic task scheduling
-3. Verify status messages are displayed correctly
-4. Test error handling scenarios
+### Verification Checklist
+- [ ] Android modules build successfully
+- [ ] iOS frameworks build successfully
+- [ ] Dependencies resolve correctly
+- [ ] Module structure follows conventions
+- [ ] Build configurations are correct
+- [ ] Documentation is in place
+- [ ] Project can be opened in IDEs (Android Studio, Xcode)
+- [ ] Gradle/XcodeGen configurations are valid
 
 ### Test Scenarios
-- [ ] App launches successfully
-- [ ] UI elements are visible and properly laid out
-- [ ] HTTP client operations work correctly
-- [ ] Logger displays log messages appropriately
-- [ ] Task scheduler schedules and executes tasks
-- [ ] Error messages are displayed appropriately
-- [ ] App handles network errors gracefully
-- [ ] App works on both simulator/emulator and physical devices
+1. **Build Verification**
+   - Build all Android modules
+   - Build all iOS frameworks
+   - Verify no build errors
+
+2. **Dependency Resolution**
+   - Verify Android dependencies resolve
+   - Verify iOS SPM dependencies resolve
+   - Check dependency versions
+
+3. **Project Structure**
+   - Verify directory structure matches specification
+   - Check file organization
+   - Validate naming conventions
+
+4. **IDE Integration**
+   - Open Android project in Android Studio
+   - Open iOS project in Xcode
+   - Verify syntax highlighting and autocomplete work
 
 ## Acceptance Criteria
 
-- [x] Playground app created for iOS
-- [x] Playground app created for Android
-- [x] Both apps integrate UplinkCoreSDK
-- [x] UI provides buttons for all major Core SDK operations
-- [x] Status/feedback is displayed to user
-- [x] Apps build successfully
-- [x] Apps run on simulators/emulators
-- [x] Apps can be installed on physical devices
-- [x] Documentation provided for setup and usage
+- [x] Repository structure created for Android and iOS
+- [x] Core SDK module created for Android (uplink-core-sdk)
+- [x] Core SDK framework created for iOS (UplinkCoreSDK)
+- [x] Build configurations set up for both platforms
+- [x] Dependency management configured
+- [x] Gradle project structure (Android)
+- [x] XcodeGen project configuration (iOS)
+- [x] Basic source files and classes created
+- [x] Documentation structure in place
+- [x] README files created with setup instructions
+- [x] Projects build successfully
+- [x] Code follows platform conventions
+- [x] Project structure supports future SDK additions
 
 ## Dependencies
 
+### Android
+- Android Gradle Plugin 8.x
+- Gradle 8.x
+- Kotlin 1.9+
+- Android SDK (API 21+)
+- Android Studio
+
 ### iOS
 - Xcode 15.0+
-- iOS 13.0+
-- CocoaPods
+- Swift 5.9+
+- iOS 13.0+ SDK
 - XcodeGen (for project generation)
+- CocoaPods (optional, for app-level dependencies)
+
+## Technical Decisions
 
 ### Android
-- Android Studio
-- Android SDK (API level 21+)
-- Gradle
+- **Gradle project structure**: Supports modular SDK development and future expansion
+- **Kotlin**: Modern, type-safe language
+- **Retrofit/OkHttp**: Industry-standard HTTP libraries
+- **Coroutines**: Native async/await support
 
-## Notes
+### iOS
+- **Unified Xcode project**: Project structure supporting Core SDK and future SDK frameworks
+- **XcodeGen**: Code-based project configuration for maintainability
+- **Swift Package Manager**: Modern dependency management
+- **Framework targets**: Proper framework output for distribution
 
-- The iOS app uses a unified SDK project structure (UplinkSDKiOS) containing the Core SDK framework
-- Framework embedding is handled automatically via build scripts
-- The Android app uses local module dependencies
-- Both implementations follow platform-specific best practices
-- The apps serve as reference implementations for Core SDK integration
+### Cross-Platform
+- **Modular architecture**: SDK is independently buildable
+- **Core SDK pattern**: Foundation for future feature SDKs
+- **Consistent naming**: Similar structure across platforms
+- **Documentation**: Comprehensive setup and usage docs
+
+## Future Considerations
+
+### Planned Additions
+- Unit test structure
+- Integration test setup
+- CI/CD pipeline configuration
+- Code coverage setup
+- Linting/formatting rules
+- Version management strategy
+- Distribution mechanism (Maven, CocoaPods, SPM)
+
+### Scalability
+- Structure supports adding new SDK modules in the future
+- Dependency management is extensible
+- Build system can handle additional modules
+- Documentation structure is maintainable
+- Core SDK provides foundation for feature SDKs
 
 ## Related Issues
-- SDK development tickets
+- Playground app creation
+- SDK implementation tasks
 - Documentation tasks
 
 ## Labels
-`playground-app`, `testing`, `ios`, `android`, `sdk-integration`, `documentation`
+`sdk-scaffolding`, `infrastructure`, `android`, `ios`, `build-system`, `project-setup`, `foundation`
 
