@@ -1,309 +1,378 @@
-# Create SDK Scaffolding
+# Create PoC SDK Integrated with Playground App
 
 ## Summary
-Establish the foundational project structure and scaffolding for Uplink SDKs across Android and iOS platforms, including core SDK modules, dependency management, build configurations, and project organization.
+Implement a Proof of Concept (PoC) version of the Uplink Core SDK with core functionality (HTTP client, logging, task scheduling) and integrate it with the Playground app for testing and validation on both Android and iOS platforms.
 
 ## Description
 
 ### Background
-To support the development of modular SDKs for the Uplink platform, we need a well-organized, scalable project structure that:
-- Supports multiple SDK modules
-- Enables code sharing and dependency management
-- Follows platform-specific best practices
-- Facilitates easy integration and testing
-- Allows for future SDK expansion
+Following the creation of SDK scaffolding and Playground app structure, we need to implement the actual Core SDK functionality as a Proof of Concept. This PoC will demonstrate the SDK's core capabilities and validate the architecture through integration with the Playground app. The PoC serves to:
+- Validate the SDK architecture and design
+- Test integration patterns with consuming applications
+- Demonstrate core functionality in a real-world scenario
+- Gather feedback for production SDK development
 
 ### Scope
 - **Platforms**: Android and iOS
-- **SDK Modules**: 
-  - Core SDK (shared utilities, HTTP client, logging)
-- **Project Organization**: Repository structure, build systems, dependency management
+- **SDK**: Uplink Core SDK (PoC implementation)
+- **Integration Target**: Playground App
+- **Core Features**:
+  - HTTP Client (GET, POST, DELETE operations)
+  - Logger (debug, info, error levels)
+  - Periodic Task Scheduler
+  - Access token management
 
 ## Technical Implementation
 
-### Repository Structure
-
-```
-uplink-sdks/
-├── android/
-│   ├── uplink-core-sdk/              # Core SDK module (Android Library)
-│   ├── playground/                    # Test/example application
-│   ├── build.gradle                   # Root build configuration
-│   ├── settings.gradle                # Module definitions
-│   └── gradle/                        # Gradle wrapper
-├── ios/
-│   ├── UplinkSDKiOS/                  # Unified SDK project (Xcode)
-│   │   ├── UplinkCoreSDK/            # Core SDK source
-│   │   └── UplinkSDKiOS.xcodeproj    # Xcode project
-│   └── Playground/                    # Test/example application
-└── docs/                              # Documentation
-```
-
 ### Android Implementation
 
-#### Project Structure
-- **Build System**: Gradle with Kotlin DSL
-- **Module Type**: Android Library (AAR)
-- **Language**: Kotlin
-- **Minimum SDK**: API 21 (Android 5.0)
+#### Core SDK Components
 
-#### Core SDK Module (`uplink-core-sdk`)
-**Location**: `android/uplink-core-sdk/`
+**1. UplinkCoreClient**
+- **Location**: `android/uplink-core-sdk/src/main/java/com/uplink/core/UplinkCoreClient.kt`
+- **Functionality**:
+  - Factory method for client creation
+  - Access to HTTP client, logger, and task scheduler
+  - Access token management
+  - Base URL configuration
 
-**Components Created**:
-- `UplinkCoreClient.kt` - Main client class
-- `HttpClient.kt` - HTTP client implementation
-- `PeriodicTaskScheduler.kt` - Task scheduling utilities
-- `Logger.kt` - Logging utilities
-- `AndroidManifest.xml` - Module manifest
-- `build.gradle` - Module build configuration
-- `proguard-rules.pro` - ProGuard rules
+**2. HttpClient**
+- **Location**: `android/uplink-core-sdk/src/main/java/com/uplink/core/http/HttpClient.kt`
+- **Functionality**:
+  - HTTP GET requests with query parameters
+  - HTTP POST requests with request body
+  - HTTP DELETE requests
+  - Bearer token authentication
+  - Response deserialization using Retrofit
+  - Error handling
 
-**Dependencies**:
+**3. Logger**
+- **Location**: `android/uplink-core-sdk/src/main/java/com/uplink/core/utils/Logger.kt`
+- **Functionality**:
+  - Debug logging
+  - Info logging
+  - Error logging
+  - Android Log integration
+
+**4. PeriodicTaskScheduler**
+- **Location**: `android/uplink-core-sdk/src/main/java/com/uplink/core/periodic/PeriodicTaskScheduler.kt`
+- **Functionality**:
+  - Schedule periodic tasks
+  - Cancel scheduled tasks
+  - Task lifecycle management
+  - Coroutine-based implementation
+
+#### Dependencies
 - Retrofit 2.x for HTTP networking
 - OkHttp for HTTP client
 - Kotlin Coroutines for async operations
+- Gson for JSON serialization/deserialization
 
-**Build Configuration**:
-```gradle
-- Library module configuration
-- ProGuard rules for release builds
-- Test source sets
-- Dependency declarations
-```
-
-#### Root Build Configuration
-**Files Created**:
-- `android/build.gradle` - Root build script
-- `android/settings.gradle` - Module inclusion
-- `android/gradle.properties` - Gradle properties
-- `android/gradle/wrapper/` - Gradle wrapper files
-
-**Features**:
-- Project setup supporting future modules
-- Dependency version management
-- Build optimization settings
-- Repository configurations
+#### Integration with Playground App
+- **Location**: `android/playground/`
+- **Integration Points**:
+  - Add UplinkCoreSDK as module dependency
+  - Create ViewModel using Core SDK client
+  - Implement UI buttons for testing each feature
+  - Display SDK operation results in UI
 
 ### iOS Implementation
 
-#### Unified SDK Project Structure
-**Location**: `ios/UplinkSDKiOS/`
+#### Core SDK Components
 
-**Project Type**: Xcode Framework Project
-**Configuration**: XcodeGen (project.yml)
-**Language**: Swift 5.9
-**Minimum iOS**: 13.0
+**1. UplinkCoreClient**
+- **Location**: `ios/UplinkSDKiOS/UplinkCoreSDK/UplinkCoreClient.swift`
+- **Functionality**:
+  - Initializer with optional base URL and access token
+  - Access to HTTP client, logger, and task scheduler
+  - Access token management
+  - Public API methods
 
-#### Core SDK Framework (`UplinkCoreSDK`)
-**Location**: `ios/UplinkSDKiOS/UplinkCoreSDK/`
+**2. HttpClient**
+- **Location**: `ios/UplinkSDKiOS/UplinkCoreSDK/HTTP/HttpClient.swift`
+- **Functionality**:
+  - HTTP GET requests with query parameters
+  - HTTP POST requests with request body
+  - HTTP DELETE requests
+  - Bearer token authentication
+  - Async/await implementation
+  - Response deserialization using Codable
+  - Error handling
 
-**Components Created**:
-- `UplinkCoreClient.swift` - Main client class
-- `HTTP/HttpClient.swift` - HTTP client implementation
-- `Periodic/PeriodicTaskScheduler.swift` - Task scheduling
-- `Utils/Logger.swift` - Logging utilities
-- `Models/` - Data models directory
+**3. Logger**
+- **Location**: `ios/UplinkSDKiOS/UplinkCoreSDK/Utils/Logger.swift`
+- **Functionality**:
+  - Debug logging
+  - Info logging
+  - Error logging
+  - OSLog integration
 
-**Framework Configuration**:
-- Framework target type
-- Swift Package Manager for dependencies
-- Alamofire (~> 5.8) dependency
-- Module definition
-- Info.plist generation
+**4. PeriodicTaskScheduler**
+- **Location**: `ios/UplinkSDKiOS/UplinkCoreSDK/Periodic/PeriodicTaskScheduler.swift`
+- **Functionality**:
+  - Schedule periodic tasks
+  - Cancel scheduled tasks
+  - Task lifecycle management
+  - Timer-based implementation
 
-**Build Settings**:
-- Deployment target: iOS 13.0
-- Swift version: 5.9
-- Code signing: Automatic
-- Framework output configuration
+#### Dependencies
+- Alamofire (~> 5.8) via Swift Package Manager for HTTP networking
+- Foundation framework for core functionality
 
-#### Project Generation
-**Configuration File**: `ios/UplinkSDKiOS/project.yml`
+#### Integration with Playground App
+- **Location**: `ios/Playground/`
+- **Integration Points**:
+  - Link UplinkCoreSDK framework
+  - Create ViewModel using Core SDK client
+  - Implement UI buttons for testing each feature
+  - Display SDK operation results in UI
+  - Framework embedding configuration
 
-**Features**:
-- XcodeGen project definition
-- Framework target definitions
-- Dependency management
-- Build scheme configuration
-- Swift Package Manager integration
+## Implementation Details
 
-**Regeneration Command**:
-```bash
-cd ios/UplinkSDKiOS
-xcodegen generate
-```
+### HTTP Client Features
 
-### Dependency Architecture
+#### Android (Retrofit-based)
+- RESTful API support
+- Type-safe request/response handling
+- Query parameter support
+- Request body serialization
+- Response deserialization
+- Error handling and retry logic
 
-#### Dependency Graph
-```
-Application
-└── uplink-core-sdk
-    └── (future SDKs will depend on core-sdk)
-```
+#### iOS (Alamofire-based)
+- RESTful API support
+- Codable-based serialization
+- Query parameter support
+- Request body encoding
+- Response decoding
+- Error handling
 
-#### Key Principles
-- **Core SDK**: Shared utilities, HTTP client, logging
-- **Modularity**: SDK is independently buildable and testable
-- **Reusability**: Core SDK provides common functionality for future SDKs
-- **Extensibility**: Structure supports adding feature SDKs that depend on Core SDK
-
-### Build Systems
+### Logger Features
 
 #### Android
-- **Gradle**: Project structure supporting future modules
-- **Kotlin DSL**: Type-safe build scripts
-- **Gradle Wrapper**: Version-controlled build tool
-- **Build Variants**: Debug/Release configurations
+- Integration with Android Log system
+- Log levels: Debug, Info, Error
+- Tag-based logging
+- Thread-safe implementation
 
 #### iOS
-- **Xcode**: Native IDE and build system
-- **XcodeGen**: Code-based project generation
-- **Swift Package Manager**: External dependencies
-- **CocoaPods**: Optional for app-level dependencies
+- Integration with OSLog system
+- Log levels: Debug, Info, Error
+- Subsystem and category support
+- Thread-safe implementation
 
-### Documentation Structure
+### Task Scheduler Features
 
-**Created**:
-- `README.md` - Repository overview and quick start
-- `ios/SETUP.md` - iOS-specific setup instructions
-- `ios/UplinkSDKiOS/README.md` - SDK project documentation
-- Code documentation (KDoc for Android, DocC for iOS)
+#### Android
+- Coroutine-based scheduling
+- Configurable intervals
+- Task cancellation support
+- Lifecycle-aware implementation
 
-## Build Instructions
+#### iOS
+- Timer-based scheduling
+- Configurable intervals
+- Task cancellation support
+- RunLoop integration
 
-### Android
-```bash
-# Build all modules
-cd android
-./gradlew build
+## Integration with Playground App
 
-# Build individual module
-./gradlew :uplink-core-sdk:build
+### Android Integration
 
-# Generate AAR file
-./gradlew :uplink-core-sdk:assembleRelease
+**ViewModel Implementation**:
+```kotlin
+class CoreSDKViewModel : ViewModel() {
+    private val coreClient = UplinkCoreClient.create()
+    
+    fun testHttpClient() { ... }
+    fun testLogger() { ... }
+    fun testTaskScheduler() { ... }
+}
 ```
 
-### iOS
-```bash
-# Generate Xcode project
-cd ios/UplinkSDKiOS
-xcodegen generate
+**UI Integration**:
+- Buttons for each SDK feature
+- Status display TextView
+- Error message handling
+- Loading states
 
-# Build framework
-xcodebuild -project UplinkSDKiOS.xcodeproj -scheme UplinkCoreSDK -sdk iphonesimulator build
+### iOS Integration
+
+**ViewModel Implementation**:
+```swift
+@MainActor
+class CoreSDKViewModel: ObservableObject {
+    private let coreClient = UplinkCoreClient()
+    
+    func testHttpClient() async { ... }
+    func testLogger() { ... }
+    func testTaskScheduler() { ... }
+}
 ```
+
+**UI Integration**:
+- Buttons for each SDK feature
+- Status display label
+- Error message handling
+- Loading states
 
 ## Testing Instructions
 
-### Verification Checklist
-- [ ] Android modules build successfully
-- [ ] iOS frameworks build successfully
-- [ ] Dependencies resolve correctly
-- [ ] Module structure follows conventions
-- [ ] Build configurations are correct
-- [ ] Documentation is in place
-- [ ] Project can be opened in IDEs (Android Studio, Xcode)
-- [ ] Gradle/XcodeGen configurations are valid
+### Unit Testing
 
-### Test Scenarios
-1. **Build Verification**
-   - Build all Android modules
-   - Build all iOS frameworks
-   - Verify no build errors
+#### Android
+- Test HTTP client with mock responses
+- Test logger output
+- Test task scheduler timing
+- Test access token management
 
-2. **Dependency Resolution**
-   - Verify Android dependencies resolve
-   - Verify iOS SPM dependencies resolve
-   - Check dependency versions
+#### iOS
+- Test HTTP client with mock responses
+- Test logger output
+- Test task scheduler timing
+- Test access token management
 
-3. **Project Structure**
-   - Verify directory structure matches specification
-   - Check file organization
-   - Validate naming conventions
+### Integration Testing via Playground App
 
-4. **IDE Integration**
-   - Open Android project in Android Studio
-   - Open iOS project in Xcode
-   - Verify syntax highlighting and autocomplete work
+#### Test Scenarios
+1. **HTTP Client Testing**
+   - [ ] GET request with query parameters
+   - [ ] POST request with JSON body
+   - [ ] DELETE request
+   - [ ] Authentication with bearer token
+   - [ ] Error handling (network errors, 4xx, 5xx)
+   - [ ] Response deserialization
+
+2. **Logger Testing**
+   - [ ] Debug log messages appear in console
+   - [ ] Info log messages appear in console
+   - [ ] Error log messages appear in console
+   - [ ] Log formatting is correct
+
+3. **Task Scheduler Testing**
+   - [ ] Task executes at specified interval
+   - [ ] Task can be cancelled
+   - [ ] Multiple tasks can run concurrently
+   - [ ] Task stops when cancelled
+
+4. **Integration Testing**
+   - [ ] SDK initializes correctly
+   - [ ] All components work together
+   - [ ] Access token updates propagate correctly
+   - [ ] Error handling works end-to-end
+
+### Manual Testing Steps
+
+1. **Build and Run Playground App**
+   ```bash
+   # Android
+   cd android
+   ./gradlew :playground:installDebug
+   
+   # iOS
+   cd ios/Playground
+   pod install
+   # Open in Xcode and run
+   ```
+
+2. **Test HTTP Client**
+   - Tap "Test HTTP GET" button
+   - Verify request is made and response displayed
+   - Test with invalid URL to verify error handling
+
+3. **Test Logger**
+   - Tap "Test Logger" button
+   - Check console/logcat for log messages
+   - Verify different log levels work
+
+4. **Test Task Scheduler**
+   - Tap "Start Task" button
+   - Verify task executes periodically
+   - Tap "Stop Task" button
+   - Verify task stops
 
 ## Acceptance Criteria
 
-- [x] Repository structure created for Android and iOS
-- [x] Core SDK module created for Android (uplink-core-sdk)
-- [x] Core SDK framework created for iOS (UplinkCoreSDK)
-- [x] Build configurations set up for both platforms
-- [x] Dependency management configured
-- [x] Gradle project structure (Android)
-- [x] XcodeGen project configuration (iOS)
-- [x] Basic source files and classes created
-- [x] Documentation structure in place
-- [x] README files created with setup instructions
-- [x] Projects build successfully
+- [x] Core SDK components implemented for Android
+- [x] Core SDK components implemented for iOS
+- [x] HTTP client supports GET, POST, DELETE operations
+- [x] HTTP client handles authentication
+- [x] HTTP client handles errors appropriately
+- [x] Logger supports debug, info, error levels
+- [x] Logger integrates with platform logging systems
+- [x] Task scheduler supports periodic execution
+- [x] Task scheduler supports cancellation
+- [x] SDK integrates with Playground app (Android)
+- [x] SDK integrates with Playground app (iOS)
+- [x] Playground app UI allows testing all SDK features
+- [x] SDK operations display results in Playground app
+- [x] Error handling works in Playground app
 - [x] Code follows platform conventions
-- [x] Project structure supports future SDK additions
+- [x] Documentation comments added to public APIs
 
 ## Dependencies
 
 ### Android
 - Android Gradle Plugin 8.x
-- Gradle 8.x
 - Kotlin 1.9+
-- Android SDK (API 21+)
-- Android Studio
+- Retrofit 2.x
+- OkHttp
+- Kotlin Coroutines
+- Gson
 
 ### iOS
 - Xcode 15.0+
 - Swift 5.9+
+- Alamofire (~> 5.8)
 - iOS 13.0+ SDK
-- XcodeGen (for project generation)
-- CocoaPods (optional, for app-level dependencies)
 
 ## Technical Decisions
 
 ### Android
-- **Gradle project structure**: Supports modular SDK development and future expansion
-- **Kotlin**: Modern, type-safe language
-- **Retrofit/OkHttp**: Industry-standard HTTP libraries
-- **Coroutines**: Native async/await support
+- **Retrofit for HTTP**: Industry-standard, type-safe HTTP client
+- **Coroutines for Async**: Native Kotlin async support
+- **Factory Pattern**: UplinkCoreClient uses factory method for initialization
+- **Nullable HTTP Client**: HTTP client only created when base URL provided
 
 ### iOS
-- **Unified Xcode project**: Project structure supporting Core SDK and future SDK frameworks
-- **XcodeGen**: Code-based project configuration for maintainability
-- **Swift Package Manager**: Modern dependency management
-- **Framework targets**: Proper framework output for distribution
+- **Alamofire for HTTP**: Popular, well-maintained HTTP library
+- **Async/Await**: Modern Swift concurrency
+- **Initializer Pattern**: UplinkCoreClient uses initializer with optional parameters
+- **Optional HTTP Client**: HTTP client only created when base URL provided
 
 ### Cross-Platform
-- **Modular architecture**: SDK is independently buildable
-- **Core SDK pattern**: Foundation for future feature SDKs
-- **Consistent naming**: Similar structure across platforms
-- **Documentation**: Comprehensive setup and usage docs
+- **Consistent API**: Similar method names and patterns across platforms
+- **Error Handling**: Platform-appropriate error handling
+- **Documentation**: Comprehensive documentation for all public APIs
 
-## Future Considerations
+## Known Limitations (PoC)
 
-### Planned Additions
-- Unit test structure
-- Integration test setup
-- CI/CD pipeline configuration
-- Code coverage setup
-- Linting/formatting rules
-- Version management strategy
-- Distribution mechanism (Maven, CocoaPods, SPM)
+- No persistent storage for configuration
+- No advanced retry logic
+- No request/response interceptors
+- No caching mechanism
+- Limited error recovery
+- No analytics/monitoring integration
 
-### Scalability
-- Structure supports adding new SDK modules in the future
-- Dependency management is extensible
-- Build system can handle additional modules
-- Documentation structure is maintainable
-- Core SDK provides foundation for feature SDKs
+## Future Enhancements (Post-PoC)
+
+- Persistent configuration storage
+- Advanced retry strategies
+- Request/response interceptors
+- Response caching
+- Enhanced error recovery
+- Analytics integration
+- Performance monitoring
+- Unit test coverage
+- Integration test suite
 
 ## Related Issues
-- Playground app creation
-- SDK implementation tasks
+- SDK Scaffolding creation
+- Playground App creation
+- Production SDK development tasks
 - Documentation tasks
 
 ## Labels
-`sdk-scaffolding`, `infrastructure`, `android`, `ios`, `build-system`, `project-setup`, `foundation`
+`poc`, `sdk-implementation`, `core-sdk`, `android`, `ios`, `integration`, `testing`, `proof-of-concept`
 
