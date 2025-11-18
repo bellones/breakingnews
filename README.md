@@ -1,112 +1,106 @@
-# App Lifecycle & Organization Management Flow
+# Profile Installation & Management Flow
 
-## App Uninstall Detection & Profile Removal
+## Single Profile Installation Flow
 
 ```mermaid
 sequenceDiagram
-    participant Device
-    participant UninstallDetector
+    participant App
+    participant ProfileManager
+    participant ProfileLister
     participant ProfileRemover
+    participant ProfileInstaller
     participant PlatformAPI
     participant BackendAPI
     participant Logger
     
-    Note over Device: App uninstalled
+    App->>ProfileManager: installProfile()
     
-    Device->>UninstallDetector: Detect uninstall
-    Note over UninstallDetector: Platform-specific detection:<br/>Android: Broadcast receiver<br/>iOS: App extension
+    ProfileManager->>ProfileLister: listProfiles()
+    ProfileLister->>PlatformAPI: Get installed profiles
+    PlatformAPI-->>ProfileLister: List of profiles
     
-    UninstallDetector->>ProfileRemover: removeAllProfiles()
-    ProfileRemover->>PlatformAPI: List installed profiles
-    PlatformAPI-->>ProfileRemover: Uplink profiles found
-    
-    loop For each Uplink profile
+    alt Existing Profile Found
+        ProfileLister-->>ProfileManager: Existing profile detected
+        ProfileManager->>ProfileRemover: removeProfile(existingId)
         ProfileRemover->>PlatformAPI: Remove profile
         PlatformAPI-->>ProfileRemover: Removal success
-        ProfileRemover->>BackendAPI: POST /profiles/{id}/removed
-        Note over BackendAPI: Reason: App uninstalled
+        ProfileRemover->>BackendAPI: Notify profile removal
+        ProfileRemover-->>ProfileManager: Profile removed
     end
     
-    ProfileRemover->>Logger: Log uninstall cleanup
-    Logger->>BackendAPI: Upload final logs
-```
-
-## Organization Status Monitoring Flow
-
-```mermaid
-sequenceDiagram
-    participant ProfileManager
-    participant BackendAPI
-    participant OrganizationService
-    participant ProfileRemover
-    participant PlatformAPI
-    participant App
+    ProfileManager->>BackendAPI: GET /profiles/{subscriberId}
+    BackendAPI-->>ProfileManager: Profile data (new/updated)
     
-    ProfileManager->>BackendAPI: GET /profiles/{subscriberId}/update
-    BackendAPI->>OrganizationService: Check organization status
-    OrganizationService-->>BackendAPI: Organization status
+    ProfileManager->>ProfileInstaller: install(profile)
     
-    alt Organization Blocked or Removed
-        BackendAPI-->>ProfileManager: Organization status: BLOCKED/REMOVED
-        ProfileManager->>ProfileRemover: removeAllProfiles()
-        ProfileRemover->>PlatformAPI: Remove all Uplink profiles
-        PlatformAPI-->>ProfileRemover: Profiles removed
-        ProfileRemover->>BackendAPI: POST /profiles/removed
-        Note over BackendAPI: Reason: Organization blocked
-        ProfileManager->>App: Notify profile removal
-        Note over App: Show user message
-    else Organization Active
-        BackendAPI-->>ProfileManager: Profile update available
-        ProfileManager->>ProfileManager: Continue with update
+    alt iOS Platform
+        ProfileInstaller->>PlatformAPI: Request user consent (if needed)
+        PlatformAPI-->>ProfileInstaller: Consent granted
+    end
+    
+    ProfileInstaller->>PlatformAPI: Install Passpoint profile
+    PlatformAPI-->>ProfileInstaller: Installation result
+    
+    alt Installation Success
+        ProfileInstaller->>Logger: Log success
+        ProfileInstaller->>ProfileManager: Installation complete
+        ProfileManager->>BackendAPI: POST /profiles/{id}/installed
+        ProfileManager-->>App: Success callback
+    else Installation Failure
+        ProfileInstaller->>Logger: Log failure (verbose)
+        ProfileInstaller->>ProfileManager: Installation failed
+        ProfileManager->>App: Error callback with details
+        ProfileManager->>BackendAPI: POST /logs (failure info)
     end
 ```
 
-## Background Operation Handling
-
-```mermaid
-graph TD
-    A[Background Operation Requested] --> B{Background Restrictions?}
-    B -->|No Restrictions| C[Execute Operation]
-    B -->|Restricted| D[Queue Operation]
-    
-    C --> E[Operation Complete]
-    
-    D --> F[Wait for App Foreground]
-    F --> G[App Foregrounded]
-    G --> H[Process Queued Operations]
-    H --> I{Operation Type?}
-    I -->|Profile Update| J[Download & Install]
-    I -->|Renewal| K[Renew Profile]
-    I -->|Polling| L[Check for Updates]
-    
-    J --> E
-    K --> E
-    L --> E
-```
-
-## Profile Information Display Flow
+## Profile Update Detection Flow
 
 ```mermaid
 sequenceDiagram
-    participant App
+    participant Scheduler
     participant ProfileManager
     participant LocalStorage
     participant BackendAPI
+    participant Logger
     
-    App->>ProfileManager: getProfileInfo()
-    ProfileManager->>LocalStorage: Get cached profile info
+    Note over Scheduler: Daily polling trigger
     
-    alt Cache Valid
-        LocalStorage-->>ProfileManager: Profile info
-        ProfileManager-->>App: Profile details
-    else Cache Stale or Missing
-        ProfileManager->>BackendAPI: GET /profiles/{id}/info
-        BackendAPI-->>ProfileManager: Current profile info
-        ProfileManager->>LocalStorage: Update cache
-        ProfileManager-->>App: Profile details
+    Scheduler->>ProfileManager: checkForUpdates()
+    ProfileManager->>LocalStorage: Get current profile version
+    LocalStorage-->>ProfileManager: Current version
+    
+    ProfileManager->>BackendAPI: GET /profiles/{subscriberId}/status
+    BackendAPI-->>ProfileManager: {version, isNew, isUpdated, priority}
+    
+    alt New Profile Available
+        ProfileManager->>Logger: Log update detected
+        ProfileManager->>ProfileManager: downloadAndInstall()
+        Note over ProfileManager: Triggers installation flow
+    else No Update
+        ProfileManager->>Logger: Log no update
+        ProfileManager-->>Scheduler: Wait for next poll
     end
-    
-    Note over App: Display in settings:<br/>- Installation date<br/>- Expiration date<br/>- Status<br/>- Version
 ```
 
+## Push Notification Trigger Flow
+
+```mermaid
+sequenceDiagram
+    participant PushService
+    participant App
+    participant SDK_Service
+    participant ProfileManager
+    participant BackendAPI
+    
+    PushService->>App: Push notification (profile topic)
+    App->>SDK_Service: handleNotification(topic, data)
+    SDK_Service->>ProfileManager: checkForUpdates()
+    
+    ProfileManager->>BackendAPI: GET /profiles/{subscriberId}
+    BackendAPI-->>ProfileManager: Updated profile
+    
+    ProfileManager->>ProfileManager: downloadAndInstall()
+    Note over ProfileManager: Follows installation flow
+```
 
