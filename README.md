@@ -1,118 +1,59 @@
-# Passpoint SDK Architecture Diagrams
+# Authentication & Initialization Flow
 
-## System Architecture Overview
+## Developer Authentication Flow
 
 ```mermaid
-graph TB
-    subgraph "App Layer"
-        APP[Uplink App]
-        APP_CONFIG[App Configuration]
-    end
+sequenceDiagram
+    participant App
+    participant SDK_Service
+    participant CoreClient
+    participant HttpClient
+    participant AuthAPI
+    participant SecureStorage
     
-    subgraph "SDK Layer"
-        subgraph "Core SDK"
-            SERVICE[UplinkService/ServiceManager]
-            CORE_CLIENT[UplinkCoreClient]
-            HTTP_CLIENT[HttpClient]
-            LOGGER[Logger]
-            SCHEDULER[PeriodicTaskScheduler]
-            LICENSE[LicenseController]
-        end
-        
-        subgraph "Passpoint SDK"
-            PASS_CLIENT[UplinkPasspointClient]
-            PROFILE_MGR[PasspointProfileManager]
-            INSTALLER[PasspointProfileInstaller]
-            REMOVER[PasspointProfileRemover]
-            LISTER[PasspointProfileLister]
-            VALIDATOR[PasspointProfileValidator]
-        end
-        
-        subgraph "Storage"
-            ENCRYPTED_STORE[Encrypted Local Storage]
-            LOG_QUEUE[Log Queue]
-        end
-    end
+    App->>SDK_Service: initialize(devCredentials, baseURL)
+    SDK_Service->>SecureStorage: Store credentials securely
+    SDK_Service->>CoreClient: Create with credentials
+    CoreClient->>HttpClient: Initialize with baseURL
     
-    subgraph "Platform APIs"
-        ANDROID_API[Android WifiManager/Enterprise APIs]
-        IOS_API[iOS NEHotspotConfigurationManager]
-        KEYSTORE[Android Keystore/iOS Keychain]
-    end
+    Note over SDK_Service: Developer authenticated
     
-    subgraph "Backend Services"
-        AUTH_API[Authentication API]
-        SUBSCRIBER_API[Subscriber API]
-        PROFILE_API[Profile API]
-        LOG_API[Log Upload API]
-        NOTIFICATION_SERVICE[Push Notification Service]
-    end
+    App->>SDK_Service: Provide end user identification
+    SDK_Service->>CoreClient: Set end user info
+    CoreClient->>HttpClient: Prepare authenticated requests
     
-    APP --> SERVICE
-    APP --> APP_CONFIG
-    SERVICE --> CORE_CLIENT
-    CORE_CLIENT --> HTTP_CLIENT
-    CORE_CLIENT --> LOGGER
-    CORE_CLIENT --> SCHEDULER
-    CORE_CLIENT --> LICENSE
-    
-    APP --> PASS_CLIENT
-    PASS_CLIENT --> PROFILE_MGR
-    PROFILE_MGR --> INSTALLER
-    PROFILE_MGR --> REMOVER
-    PROFILE_MGR --> LISTER
-    PROFILE_MGR --> VALIDATOR
-    
-    CORE_CLIENT --> PASS_CLIENT
-    HTTP_CLIENT --> AUTH_API
-    HTTP_CLIENT --> SUBSCRIBER_API
-    HTTP_CLIENT --> PROFILE_API
-    HTTP_CLIENT --> LOG_API
-    
-    INSTALLER --> ANDROID_API
-    INSTALLER --> IOS_API
-    REMOVER --> ANDROID_API
-    REMOVER --> IOS_API
-    
-    SERVICE --> KEYSTORE
-    LOGGER --> LOG_QUEUE
-    LOG_QUEUE --> LOG_API
-    SCHEDULER --> PROFILE_API
-    
-    APP --> NOTIFICATION_SERVICE
-    NOTIFICATION_SERVICE --> PROFILE_MGR
-    
-    PROFILE_MGR --> ENCRYPTED_STORE
+    App->>SDK_Service: start()
+    SDK_Service->>HttpClient: Authenticate developer
+    HttpClient->>AuthAPI: POST /auth/developer
+    AuthAPI-->>HttpClient: Access token + license metadata
+    HttpClient-->>SDK_Service: Authentication success
+    SDK_Service->>CoreClient: Update license from auth metadata
+    SDK_Service-->>App: Service started
 ```
 
-## Component Interaction Diagram
+## Subscriber Registration Flow
 
 ```mermaid
-graph LR
-    subgraph "Initialization Flow"
-        A[App Starts] --> B[Initialize Service]
-        B --> C[Authenticate Developer]
-        C --> D[Get End User Info]
-        D --> E[Register Subscriber]
-        E --> F[Start Polling]
-    end
+sequenceDiagram
+    participant App
+    participant PasspointClient
+    participant ProfileManager
+    participant HttpClient
+    participant SubscriberAPI
     
-    subgraph "Profile Management Flow"
-        G[Check for Updates] --> H{Update Available?}
-        H -->|Yes| I[Download Profile]
-        H -->|No| J[Wait for Next Poll]
-        I --> K[Remove Existing Profile]
-        K --> L[Install New Profile]
-        L --> M[Update Local Storage]
-    end
+    App->>PasspointClient: Provide end user identification
+    Note over App,PasspointClient: Device info, User ID, etc.
     
-    subgraph "Renewal Flow"
-        N[Monitor Expiration] --> O{90 Days Before?}
-        O -->|Yes| P[Request Renewal]
-        O -->|No| N
-        P --> Q[Download Renewed Profile]
-        Q --> R[Install Renewed Profile]
-        R --> S[Remove Old Profile]
-    end
+    PasspointClient->>ProfileManager: Check if subscriber exists
+    ProfileManager->>HttpClient: GET /subscribers/{userId}
+    HttpClient->>SubscriberAPI: Check subscriber
+    SubscriberAPI-->>HttpClient: 404 Not Found
+    
+    ProfileManager->>HttpClient: POST /subscribers
+    HttpClient->>SubscriberAPI: Register new subscriber
+    Note over SubscriberAPI: Create subscriber<br/>Generate Passpoint profile
+    SubscriberAPI-->>HttpClient: Subscriber created + Profile ready
+    HttpClient-->>ProfileManager: Subscriber registered
+    ProfileManager-->>PasspointClient: Ready for profile download
 ```
 
