@@ -109,3 +109,4 @@ sequenceDiagram
     Note over App: Display in settings:<br/>- Installation date<br/>- Expiration date<br/>- Status<br/>- Version
 ```
 
+
