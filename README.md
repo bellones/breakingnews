@@ -1,104 +1,111 @@
-# Error Handling & Logging Flow
+# App Lifecycle & Organization Management Flow
 
-## Error Handling Flow
+## App Uninstall Detection & Profile Removal
 
 ```mermaid
 sequenceDiagram
-    participant ProfileInstaller
+    participant Device
+    participant UninstallDetector
+    participant ProfileRemover
+    participant PlatformAPI
+    participant BackendAPI
     participant Logger
-    participant ErrorHandler
+    
+    Note over Device: App uninstalled
+    
+    Device->>UninstallDetector: Detect uninstall
+    Note over UninstallDetector: Platform-specific detection:<br/>Android: Broadcast receiver<br/>iOS: App extension
+    
+    UninstallDetector->>ProfileRemover: removeAllProfiles()
+    ProfileRemover->>PlatformAPI: List installed profiles
+    PlatformAPI-->>ProfileRemover: Uplink profiles found
+    
+    loop For each Uplink profile
+        ProfileRemover->>PlatformAPI: Remove profile
+        PlatformAPI-->>ProfileRemover: Removal success
+        ProfileRemover->>BackendAPI: POST /profiles/{id}/removed
+        Note over BackendAPI: Reason: App uninstalled
+    end
+    
+    ProfileRemover->>Logger: Log uninstall cleanup
+    Logger->>BackendAPI: Upload final logs
+```
+
+## Organization Status Monitoring Flow
+
+```mermaid
+sequenceDiagram
+    participant ProfileManager
+    participant BackendAPI
+    participant OrganizationService
+    participant ProfileRemover
+    participant PlatformAPI
     participant App
-    participant BackendAPI
-    participant LogQueue
     
-    ProfileInstaller->>ProfileInstaller: Attempt installation
+    ProfileManager->>BackendAPI: GET /profiles/{subscriberId}/update
+    BackendAPI->>OrganizationService: Check organization status
+    OrganizationService-->>BackendAPI: Organization status
     
-    alt Installation Success
-        ProfileInstaller->>Logger: Log success (info level)
-        ProfileInstaller-->>App: Success callback
-    else Installation Failure
-        ProfileInstaller->>Logger: Log failure (error level, verbose)
-        Logger->>ErrorHandler: Handle error
-        
-        ErrorHandler->>ErrorHandler: Determine error type
-        Note over ErrorHandler: Permission denied<br/>Network error<br/>Platform error<br/>etc.
-        
-        ErrorHandler->>App: Error callback with details
-        Note over App: User-friendly message<br/>e.g., "Update Wi-Fi settings"
-        
-        ErrorHandler->>ErrorHandler: Retry logic (exponential backoff)
-        alt Retry Attempts < 3
-            ErrorHandler->>ProfileInstaller: Retry installation
-        else Max Retries Reached
-            ErrorHandler->>Logger: Log persistent failure
-            ErrorHandler->>BackendAPI: POST /logs (failure incident)
-        end
-        
-        Logger->>LogQueue: Queue log entry
-        LogQueue->>BackendAPI: Upload logs (when online)
+    alt Organization Blocked or Removed
+        BackendAPI-->>ProfileManager: Organization status: BLOCKED/REMOVED
+        ProfileManager->>ProfileRemover: removeAllProfiles()
+        ProfileRemover->>PlatformAPI: Remove all Uplink profiles
+        PlatformAPI-->>ProfileRemover: Profiles removed
+        ProfileRemover->>BackendAPI: POST /profiles/removed
+        Note over BackendAPI: Reason: Organization blocked
+        ProfileManager->>App: Notify profile removal
+        Note over App: Show user message
+    else Organization Active
+        BackendAPI-->>ProfileManager: Profile update available
+        ProfileManager->>ProfileManager: Continue with update
     end
 ```
 
-## Logging & Upload Flow
-
-```mermaid
-sequenceDiagram
-    participant SDK_Component
-    participant Logger
-    participant LogQueue
-    participant NetworkMonitor
-    participant BackendAPI
-    
-    SDK_Component->>Logger: log(message, level, context)
-    Note over Logger: Context includes:<br/>- Organization ID<br/>- Subscriber ID<br/>- Device info<br/>- User identification
-    
-    Logger->>Logger: Format structured log
-    Logger->>LogQueue: Enqueue log entry
-    
-    Note over LogQueue: Queue persists locally
-    
-    alt Device Online
-        NetworkMonitor->>LogQueue: Check for pending logs
-        LogQueue->>LogQueue: Batch logs (compress)
-        LogQueue->>BackendAPI: POST /logs (batch upload)
-        BackendAPI-->>LogQueue: Upload success
-        LogQueue->>LogQueue: Clear uploaded logs
-    else Device Offline
-        LogQueue->>LogQueue: Store logs locally
-        Note over LogQueue: Upload on next<br/>online event
-    end
-```
-
-## Error Recovery Flow
+## Background Operation Handling
 
 ```mermaid
 graph TD
-    A[Operation Fails] --> B{Error Type?}
-    B -->|Permission Denied| C[Notify App User]
-    B -->|Network Error| D[Queue for Retry]
-    B -->|Platform Error| E[Log & Report]
-    B -->|Installation Failed| F[Retry with Backoff]
+    A[Background Operation Requested] --> B{Background Restrictions?}
+    B -->|No Restrictions| C[Execute Operation]
+    B -->|Restricted| D[Queue Operation]
     
-    C --> G[Show User Message]
-    G --> H[Retry on Next App Launch]
+    C --> E[Operation Complete]
     
-    D --> I{Retry Count < 3?}
-    I -->|Yes| J[Exponential Backoff]
-    J --> K[Retry Operation]
-    K --> L{Success?}
-    L -->|Yes| M[Continue Flow]
-    L -->|No| I
-    I -->|No| N[Report Persistent Failure]
+    D --> F[Wait for App Foreground]
+    F --> G[App Foregrounded]
+    G --> H[Process Queued Operations]
+    H --> I{Operation Type?}
+    I -->|Profile Update| J[Download & Install]
+    I -->|Renewal| K[Renew Profile]
+    I -->|Polling| L[Check for Updates]
     
-    E --> O[Log to Backend]
-    O --> P[Alert Monitoring]
+    J --> E
+    K --> E
+    L --> E
+```
+
+## Profile Information Display Flow
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant ProfileManager
+    participant LocalStorage
+    participant BackendAPI
     
-    F --> Q{Retry Count < 3?}
-    Q -->|Yes| R[Wait & Retry]
-    Q -->|No| S[Fallback to Polling]
+    App->>ProfileManager: getProfileInfo()
+    ProfileManager->>LocalStorage: Get cached profile info
     
-    H --> T[Operation Complete]
-    M --> T
-    S --> T
+    alt Cache Valid
+        LocalStorage-->>ProfileManager: Profile info
+        ProfileManager-->>App: Profile details
+    else Cache Stale or Missing
+        ProfileManager->>BackendAPI: GET /profiles/{id}/info
+        BackendAPI-->>ProfileManager: Current profile info
+        ProfileManager->>LocalStorage: Update cache
+        ProfileManager-->>App: Profile details
+    end
+    
+    Note over App: Display in settings:<br/>- Installation date<br/>- Expiration date<br/>- Status<br/>- Version
 ```
 
