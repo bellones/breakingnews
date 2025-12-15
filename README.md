@@ -1,271 +1,313 @@
-# Android Permissions Guide
+# iOS Permissions and Entitlements Guide
 
 ## Overview
 
-The Uplink Passpoint Profile SDK requires specific permissions to function correctly on Android devices. This document outlines all required permissions, their purposes, and how to handle them in your application.
+The Uplink Passpoint Profile SDK requires specific entitlements to function correctly on iOS devices. Unlike Android, iOS uses entitlements (declared in the app's entitlements file) rather than runtime permissions for Passpoint functionality. This document outlines all required entitlements and how to configure them.
 
-## Required Permissions
+## Required Entitlements
 
-### Manifest Permissions
-
-These permissions must be declared in your `AndroidManifest.xml`:
-
-#### 1. `ACCESS_WIFI_STATE`
-- **Purpose**: Allows the app to access information about Wi-Fi networks
-- **Required for**: Reading Wi-Fi state, checking network connectivity
-- **Declaration**:
-  ```xml
-  <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-  ```
-- **Runtime Permission**: Not required (normal permission)
-
-#### 2. `CHANGE_WIFI_STATE`
-- **Purpose**: Allows the app to change Wi-Fi connectivity state
+### 1. `com.apple.developer.networking.HotspotConfiguration`
+- **Purpose**: Allows the app to configure Wi-Fi hotspot and Passpoint profiles
 - **Required for**: Installing, modifying, and removing Passpoint profiles
-- **Declaration**:
-  ```xml
-  <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-  ```
-- **Runtime Permission**: Not required (normal permission)
+- **Declaration**: Must be added to your app's `.entitlements` file
+- **Apple Developer Portal**: Must be enabled for your App ID
 
-#### 3. `ACCESS_FINE_LOCATION`
-- **Purpose**: Required for Wi-Fi operations on Android 6.0 (API 23) and higher
-- **Required for**: All Passpoint profile operations (install, list, remove)
-- **Declaration**:
-  ```xml
-  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-  ```
-- **Runtime Permission**: **REQUIRED** on Android 6.0+ (dangerous permission)
-- **Note**: This is a location permission, but it's required by Android for Wi-Fi operations even if you're not using location features.
+### 2. `com.apple.developer.networking.wifi-info`
+- **Purpose**: Allows the app to access Wi-Fi network information
+- **Required for**: Listing installed Passpoint profiles, reading Wi-Fi state
+- **Declaration**: Must be added to your app's `.entitlements` file
+- **Apple Developer Portal**: Must be enabled for your App ID
 
-#### 4. `INTERNET`
-- **Purpose**: Allows the app to make network requests
-- **Required for**: API calls to fetch Passpoint profiles
-- **Declaration**:
-  ```xml
-  <uses-permission android:name="android.permission.INTERNET" />
-  ```
-- **Runtime Permission**: Not required (normal permission)
+## Entitlements File Configuration
 
-## Runtime Permissions (Android 6.0+)
+### Creating/Updating Entitlements File
 
-Starting from Android 6.0 (API level 23), `ACCESS_FINE_LOCATION` is a dangerous permission that must be requested at runtime. The SDK provides automatic permission request functionality.
+1. **In Xcode**:
+   - Select your app target
+   - Go to **Signing & Capabilities** tab
+   - Click **+ Capability**
+   - Add **Hotspot Configuration** capability
+   - Add **Wi-Fi Information** capability (if available)
 
-### Permission Request Flow
+2. **Manual Configuration**:
+   Create or update your `.entitlements` file:
 
-1. **Check Permissions**: The SDK checks if all required permissions are granted
-2. **Request Missing Permissions**: If permissions are missing, the SDK automatically requests them
-3. **Handle Results**: The SDK handles permission grant/denial and provides user-friendly error messages
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.HotspotConfiguration</key>
+    <true/>
+    <key>com.apple.developer.networking.wifi-info</key>
+    <true/>
+</dict>
+</plist>
+```
 
-### Using the SDK's Permission Manager
+### Entitlements File Location
 
-The SDK includes a `PasspointPermissionManager` that handles permission checking and requesting:
+- **Xcode Project**: Usually named `YourApp.entitlements` in your project root
+- **Build Settings**: Reference the entitlements file in **Code Signing Entitlements** build setting
 
-```kotlin
-import com.uplink.passpoint.permissions.PasspointPermissionManager
+## Apple Developer Portal Configuration
 
-// Check permissions
-val permissionManager = PasspointPermissionManager()
-val status = permissionManager.checkPermissions(context)
+### Step 1: Enable Capabilities for App ID
 
-if (!status.allGranted) {
-    // Request permissions (requires Activity context)
-    permissionManager.requestPermissions(activity) { result ->
-        if (result.allGranted) {
-            // All permissions granted, proceed with operation
-        } else {
-            // Show user-friendly error message
-            showError(result.userFriendlyMessage)
-        }
-    }
+1. Log in to [Apple Developer Portal](https://developer.apple.com/account)
+2. Navigate to **Certificates, Identifiers & Profiles**
+3. Select **Identifiers** > **App IDs**
+4. Select your App ID (or create a new one)
+5. Enable the following capabilities:
+   - **Hotspot Configuration** (`com.apple.developer.networking.HotspotConfiguration`)
+   - **Wi-Fi Information** (`com.apple.developer.networking.wifi-info`)
+6. Click **Save**
+
+### Step 2: Update Provisioning Profiles
+
+After enabling capabilities:
+1. Navigate to **Profiles** in Developer Portal
+2. Select your provisioning profile (Development/Distribution)
+3. Click **Edit**
+4. Ensure your App ID with enabled capabilities is selected
+5. Click **Generate** to create a new profile
+6. Download and install the new profile in Xcode
+
+### Step 3: Verify in Xcode
+
+1. Open your project in Xcode
+2. Select your app target
+3. Go to **Signing & Capabilities** tab
+4. Verify both capabilities are listed:
+   - ✅ Hotspot Configuration
+   - ✅ Wi-Fi Information
+
+## Entitlement Validation
+
+The SDK includes automatic entitlement validation. Before performing any Passpoint operations, the SDK checks if required entitlements are present.
+
+### Using the SDK's Permission Validator
+
+```swift
+import UplinkPasspointProfileSDK
+
+// Check entitlements
+let validator = PasspointPermissionValidator()
+let status = validator.validatePermissions()
+
+if !status.allPresent {
+    // Show user-friendly error message
+    showError(status.userFriendlyMessage)
+} else {
+    // Proceed with Passpoint operations
 }
 ```
 
-### Manual Permission Handling
+### Manual Validation
 
-If you prefer to handle permissions manually:
+You can also check entitlements manually:
 
-```kotlin
-// Check if permission is granted
-if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) 
-    != PackageManager.PERMISSION_GRANTED) {
-    // Request permission
-    ActivityCompat.requestPermissions(
-        activity,
-        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-        PERMISSION_REQUEST_CODE
-    )
+```swift
+// Check if entitlements file exists and contains required keys
+if let entitlements = Bundle.main.object(forInfoDictionaryKey: "Entitlements") as? [String: Any] {
+    let hasHotspotConfig = entitlements["com.apple.developer.networking.HotspotConfiguration"] as? Bool ?? false
+    let hasWifiInfo = entitlements["com.apple.developer.networking.wifi-info"] as? Bool ?? false
+    
+    if !hasHotspotConfig || !hasWifiInfo {
+        // Show error
+    }
 }
 ```
 
 ## Permission Requirements by Operation
 
 ### Install Profile
-- `ACCESS_FINE_LOCATION` (runtime permission required)
-- `CHANGE_WIFI_STATE`
-- `ACCESS_WIFI_STATE`
+- `com.apple.developer.networking.HotspotConfiguration` (required)
+- `com.apple.developer.networking.wifi-info` (required)
 
 ### List Profiles
-- `ACCESS_FINE_LOCATION` (runtime permission required)
-- `ACCESS_WIFI_STATE`
+- `com.apple.developer.networking.wifi-info` (required)
+- `com.apple.developer.networking.HotspotConfiguration` (recommended)
 
 ### Remove Profile
-- `ACCESS_FINE_LOCATION` (runtime permission required)
-- `CHANGE_WIFI_STATE`
-- `ACCESS_WIFI_STATE`
+- `com.apple.developer.networking.HotspotConfiguration` (required)
+- `com.apple.developer.networking.wifi-info` (required)
 
-## Android Version Considerations
+## iOS Version Considerations
 
-### Android 5.1 and below (API < 23)
-- All permissions are granted at install time
-- No runtime permission requests needed
+### iOS 11.0+
+- Passpoint profile installation is supported
+- `NEHotspotConfiguration` API available
+- Requires entitlements
 
-### Android 6.0+ (API 23+)
-- `ACCESS_FINE_LOCATION` must be requested at runtime
-- User can grant or deny permission
-- App must handle permission denial gracefully
+### iOS 13.0+
+- Enhanced Passpoint support with `NEHotspotHS20Settings`
+- Better roaming support
+- All entitlements still required
 
-### Android 10+ (API 29+)
-- Location permission is still required for Wi-Fi operations
-- Additional restrictions may apply
-
-### Android 11+ (API 30+)
-- Passpoint profiles can be installed via `WifiNetworkSuggestion` API
-- Location permission still required
-
-## Manifest Configuration
-
-### Complete Manifest Example
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.yourapp">
-
-    <!-- Required for Passpoint SDK -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-
-    <application
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:theme="@style/AppTheme">
-        <!-- Your activities -->
-    </application>
-</manifest>
-```
+### iOS 14.0+
+- Additional privacy protections
+- Entitlements still required for Passpoint operations
 
 ## Error Messages
 
-The SDK provides user-friendly error messages when permissions are missing:
+The SDK provides user-friendly error messages when entitlements are missing:
 
-- **Missing Location Permission**: "Location permission is required to configure Wi-Fi networks. Please grant permission in Settings."
-- **Missing Wi-Fi Permission**: "Wi-Fi permission is required. Please enable it in your device settings."
-- **Multiple Missing Permissions**: "All required permissions must be granted to install Passpoint profiles."
+- **Missing Hotspot Configuration**: "Hotspot Configuration entitlement is required. Please enable it in Xcode > Signing & Capabilities."
+- **Missing Wi-Fi Info**: "Wi-Fi Info entitlement is missing. Please add it in Apple Developer Portal."
+- **Multiple Missing Entitlements**: "Required entitlements are not configured. Please check your app's capabilities."
 
 ## Troubleshooting
 
-### Permission Denied Error
+### Entitlement Not Found Error
 
-**Problem**: App crashes or returns error when trying to install/list/remove profiles.
-
-**Solution**:
-1. Ensure `ACCESS_FINE_LOCATION` is declared in manifest
-2. Request runtime permission before calling SDK methods
-3. Check that user granted permission (not just requested)
-
-### Permission Request Not Showing
-
-**Problem**: Permission dialog doesn't appear.
+**Problem**: App crashes or returns error about missing entitlements.
 
 **Solution**:
-1. Ensure you're using an `Activity` context (not Application context) for permission requests
-2. Check that permission is declared in manifest
-3. Verify you're not requesting permission that's already granted
-4. Check if user previously denied and selected "Don't ask again"
+1. Verify entitlements file exists and is included in target
+2. Check that entitlements are enabled in Apple Developer Portal for your App ID
+3. Ensure provisioning profile includes the entitlements
+4. Clean build folder and rebuild (Product > Clean Build Folder)
 
-### Location Permission Required for Wi-Fi
+### Capability Not Available in Xcode
 
-**Problem**: Why do I need location permission for Wi-Fi operations?
-
-**Solution**: This is an Android system requirement. Starting from Android 6.0, accessing Wi-Fi information requires location permission because Wi-Fi networks can be used to infer device location. This is a platform requirement, not an SDK requirement.
-
-### Permission Already Granted But Still Failing
-
-**Problem**: Permission shows as granted but SDK operations still fail.
+**Problem**: Can't find "Hotspot Configuration" or "Wi-Fi Information" capability in Xcode.
 
 **Solution**:
-1. Verify permission is actually granted: `ContextCompat.checkSelfPermission()`
-2. Check if device location services are enabled (Settings > Location)
-3. Ensure you're checking permission on the correct context (Activity context)
+1. Ensure you're using Xcode 11.0 or later
+2. Check that your Apple Developer account has the capability enabled
+3. Manually add to entitlements file (see manual configuration above)
+4. Verify your Team ID is set correctly in project settings
+
+### Provisioning Profile Issues
+
+**Problem**: Build fails with "Provisioning profile doesn't include the required entitlement".
+
+**Solution**:
+1. Enable capabilities in Apple Developer Portal for your App ID
+2. Regenerate provisioning profile in Developer Portal
+3. Download and install new profile in Xcode
+4. Select the correct provisioning profile in Xcode (Signing & Capabilities)
+5. Clean and rebuild project
+
+### Entitlements Not Applied
+
+**Problem**: Entitlements file exists but capabilities don't work.
+
+**Solution**:
+1. Verify entitlements file is referenced in **Code Signing Entitlements** build setting
+2. Check that file is included in target membership
+3. Ensure entitlements file is in the correct location (usually project root)
+4. Verify file format is correct (XML plist format)
+
+### Simulator Limitations
+
+**Problem**: Passpoint operations don't work in iOS Simulator.
+
+**Solution**:
+- Passpoint profile installation requires a physical device
+- NetworkExtension APIs have limited support in simulator
+- Test on a physical iOS device for full functionality
 
 ## Best Practices
 
-1. **Request Permissions Early**: Request permissions when the user first accesses Passpoint features, not when they try to install a profile
-2. **Explain Why**: Show a rationale dialog explaining why location permission is needed for Wi-Fi operations
-3. **Handle Denial Gracefully**: If user denies permission, show helpful instructions on how to grant it manually
-4. **Check Before Operations**: Always check permissions before calling SDK methods
-5. **Use SDK's Permission Manager**: The SDK's permission manager handles edge cases and provides consistent error messages
+1. **Configure Early**: Set up entitlements during initial project setup
+2. **Verify in Portal**: Always verify capabilities are enabled in Apple Developer Portal
+3. **Test on Device**: Test Passpoint functionality on physical devices, not simulator
+4. **Check Before Operations**: Use SDK's validation before calling Passpoint methods
+5. **Handle Errors Gracefully**: Show helpful error messages if entitlements are missing
 
 ## Example: Complete Integration
 
-```kotlin
-class MainActivity : AppCompatActivity() {
-    private lateinit var passpointClient: UplinkPasspointClient
-    
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+```swift
+import UIKit
+import UplinkCoreSDK
+import UplinkPasspointProfileSDK
+
+@main
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        // Validate entitlements on app launch
+        validateEntitlements()
         
-        // Initialize SDK
-        val coreClient = UplinkCoreClient.fromService()
-        passpointClient = UplinkPasspointClient(coreClient)
-        
-        // Check and request permissions
-        checkPermissions()
+        return true
     }
     
-    private fun checkPermissions() {
-        val permissionManager = PasspointPermissionManager()
-        val status = permissionManager.checkPermissions(this)
+    private func validateEntitlements() {
+        let validator = PasspointPermissionValidator()
+        let status = validator.validatePermissions()
         
-        if (!status.allGranted) {
-            // Show rationale if needed
-            if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)) {
-                showRationaleDialog()
-            } else {
-                // Request permissions
-                permissionManager.requestPermissions(this) { result ->
-                    if (!result.allGranted) {
-                        showPermissionDeniedDialog()
-                    }
-                }
-            }
+        if !status.allPresent {
+            // Log error (in production, you might want to show an alert)
+            print("⚠️ Missing entitlements: \(status.missingEntitlements)")
+            print("Message: \(status.userFriendlyMessage)")
         }
     }
+}
+
+class PasspointViewController: UIViewController {
+    private let passpointClient: UplinkPasspointClient
     
-    private fun installProfile() {
-        // SDK will check permissions automatically, but you can also check first
-        val permissionManager = PasspointPermissionManager()
-        if (!permissionManager.hasAllPermissions(this)) {
-            checkPermissions()
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        // Initialize SDK
+        let coreClient = UplinkCoreClient.fromService()
+        passpointClient = UplinkPasspointClient(coreClient: coreClient)
+    }
+    
+    func installProfile() async {
+        // SDK will validate entitlements automatically, but you can check first
+        let validator = PasspointPermissionValidator()
+        let status = validator.validatePermissions()
+        
+        guard status.allPresent else {
+            showError(status.userFriendlyMessage)
             return
         }
         
         // Proceed with installation
-        lifecycleScope.launch {
-            val result = passpointClient.profileManager().installProfile(profile)
+        do {
+            let result = try await passpointClient.getProfileManager().installProfile(profile)
             // Handle result
+        } catch {
+            // Handle error
         }
     }
 }
 ```
 
+## Xcode Project Configuration
+
+### Using XcodeGen
+
+If using `project.yml` with XcodeGen, add entitlements:
+
+```yaml
+targets:
+  YourApp:
+    entitlements:
+      path: YourApp.entitlements
+    settings:
+      CODE_SIGN_ENTITLEMENTS: YourApp.entitlements
+```
+
+### Manual Xcode Setup
+
+1. Select your app target
+2. Go to **Build Settings**
+3. Search for "Code Signing Entitlements"
+4. Set value to: `YourApp.entitlements` (or path to your entitlements file)
+5. Go to **Signing & Capabilities**
+6. Add capabilities as described above
+
 ## Additional Resources
 
-- [Android Permissions Overview](https://developer.android.com/guide/topics/permissions/overview)
-- [Request App Permissions](https://developer.android.com/training/permissions/requesting)
-- [Wi-Fi Configuration Guide](https://developer.android.com/guide/topics/connectivity/wifi-suggest)
+- [Apple Entitlements Documentation](https://developer.apple.com/documentation/bundleresources/entitlements)
+- [NetworkExtension Framework](https://developer.apple.com/documentation/networkextension)
+- [NEHotspotConfiguration](https://developer.apple.com/documentation/networkextension/nehotspotconfiguration)
+- [App Capabilities](https://developer.apple.com/documentation/xcode/adding-capabilities-to-your-app)
 
