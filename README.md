@@ -1,137 +1,61 @@
 ## Overview
 
-The Uplink Core SDK provides foundational services for authentication, HTTP communication, logging, task scheduling, and license management. It serves as the base layer for all Uplink SDK modules.
+The iOS Passpoint SDK provides comprehensive Passpoint (Hotspot 2.0) profile management for iOS applications. It supports iOS 13.0 and higher.
 
-## UplinkCoreClient
+## Important iOS Limitations
 
-The main client class for the Core SDK. Provides access to authentication, HTTP client, and utility services.
+- **Profile Removal**: iOS does not support programmatic removal of Passpoint profiles. Users must remove profiles manually from Settings > Wi-Fi > Passpoint profiles.
+- **Profile Listing**: iOS API limitations mean the SDK uses a local cache to track installed profiles. The system API cannot list all Passpoint configurations.
+- **Background Tasks**: Requires proper background task registration in `Info.plist` and `AppDelegate`.
+
+## UplinkPasspointClient
+
+The main client class for the Passpoint SDK. Provides access to profile management and lifecycle services.
 
 ### Initialization
 
 #### `init`
 
-Creates a new Core SDK client instance without authentication.
+Creates a new Passpoint SDK client instance.
 
 ```swift
-public init(baseURL: String? = nil, accessToken: String? = nil)
+public init(
+    coreClient: UplinkCoreClient? = nil,
+    apiBaseURL: String? = nil,
+    accessToken: String? = nil,
+    errorCallback: PasspointErrorCallback? = nil
+)
 ```
 
 **Parameters:**
-- `baseURL`: Optional base URL for API communication
+- `coreClient`: Optional core SDK client for shared utilities
+- `apiBaseURL`: Optional API base URL for backend integration
 - `accessToken`: Optional access token for authenticated requests
+- `errorCallback`: Optional callback for installation error notifications
 
 **Example:**
 ```swift
-let coreClient = UplinkCoreClient(
-    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-    accessToken: nil
+let passpointClient = UplinkPasspointClient(
+    coreClient: coreClient,
+    errorCallback: MyErrorCallback()
 )
 ```
 
-#### `create`
+### Profile Manager Access
 
-Creates a new Core SDK client instance with authentication.
+#### `getProfileManager`
+
+Gets the Passpoint profile manager.
 
 ```swift
-public static func create(
-    baseURL: String,
-    appId: String,
-    appSecret: String,
-    deviceInfo: DeviceInfo
-) async -> UplinkCoreClient
+public func getProfileManager() -> PasspointProfileManager
 ```
 
-**Parameters:**
-- `baseURL`: Base URL for API communication (e.g., `"https://api-gateway.develop.uplink.xyz/v2"`)
-- `appId`: Developer application ID
-- `appSecret`: Developer application secret
-- `deviceInfo`: Device information for registration
-
-**Returns:** Authenticated `UplinkCoreClient` instance
-
-**Throws:** Error if authentication fails
+**Returns:** `PasspointProfileManager` instance
 
 **Example:**
 ```swift
-let deviceInfo = DeviceInfo(
-    deviceId: getDeviceId(),
-    deviceModel: UIDevice.current.model,
-    osVersion: UIDevice.current.systemVersion,
-    osType: "iOS"
-)
-
-let coreClient = await UplinkCoreClient.create(
-    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-    appId: "your-app-id",
-    appSecret: "your-app-secret",
-    deviceInfo: deviceInfo
-)
-```
-
-#### `fromService`
-
-Gets the core client from the service singleton. Initializes and starts the service if not already done.
-
-```swift
-public static func fromService(
-    baseURL: String? = nil,
-    accessToken: String? = nil
-) -> UplinkCoreClient?
-```
-
-**Parameters:**
-- `baseURL`: Optional base URL for API communication
-- `accessToken`: Optional access token for authenticated requests
-
-**Returns:** `UplinkCoreClient` instance from the service, or `nil` if service is not initialized
-
-**Note:** The service must be initialized separately using `UplinkServiceManager.shared.initialize()`
-
-**Example:**
-```swift
-let coreClient = UplinkCoreClient.fromService(
-    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-    accessToken: nil
-)
-```
-
-### Authentication
-
-#### `refreshTokenIfNeeded`
-
-Refreshes the authentication token if it has expired. Re-authenticates using stored credentials.
-
-```swift
-public func refreshTokenIfNeeded() async
-```
-
-**Example:**
-```swift
-await coreClient.refreshTokenIfNeeded()
-```
-
-### Subscriber Management
-
-#### `createSubscriber`
-
-Creates a subscriber manually. Uses organizationId from the stored JWT token.
-
-```swift
-public func createSubscriber() async throws -> SubscriberResponse
-```
-
-**Returns:** `SubscriberResponse` containing subscriber ID
-
-**Throws:** Error if subscriber creation fails
-
-**Example:**
-```swift
-do {
-    let subscriber = try await coreClient.createSubscriber()
-    print("Subscriber created: \(subscriber.subscriberId)")
-} catch {
-    print("Failed to create subscriber: \(error.localizedDescription)")
-}
+let profileManager = passpointClient.getProfileManager()
 ```
 
 ### Token Management
@@ -147,748 +71,626 @@ public func setAccessToken(_ token: String?)
 **Parameters:**
 - `token`: New access token (or `nil` to clear)
 
-**Example:**
-```swift
-coreClient.setAccessToken("new-jwt-token")
-```
+### Profile Fetching
 
-#### `getIsAuthenticated`
+#### `fetchIOSPasspointProfile`
 
-Checks if the client is authenticated.
+Fetches iOS Passpoint profile from external endpoint with automatic subscriber creation.
 
 ```swift
-public func getIsAuthenticated() -> Bool
+public func fetchIOSPasspointProfile() async throws -> IOSPasspointProfileResponse
 ```
 
-**Returns:** `true` if authenticated, `false` otherwise
-
-**Example:**
-```swift
-if coreClient.getIsAuthenticated() {
-    // Proceed with authenticated operations
-}
-```
-
-### Utility Accessors
-
-#### `getHttpClient`
-
-Gets the HTTP client for API communication.
-
-```swift
-public func getHttpClient() -> HttpClient?
-```
-
-**Returns:** `HttpClient` instance or `nil` if not initialized
-
-**Example:**
-```swift
-if let httpClient = coreClient.getHttpClient() {
-    // Use HTTP client
-}
-```
-
-#### `getTaskScheduler`
-
-Gets the periodic task scheduler.
-
-```swift
-public func getTaskScheduler() -> PeriodicTaskScheduler
-```
-
-**Returns:** `PeriodicTaskScheduler` instance
-
-**Example:**
-```swift
-let scheduler = coreClient.getTaskScheduler()
-```
-
-#### `getLogger`
-
-Gets the logger utility.
-
-```swift
-public func getLogger() -> Logger
-```
-
-**Returns:** `Logger` instance
-
-**Example:**
-```swift
-let logger = coreClient.getLogger()
-logger.info("Application started")
-```
-
-#### `getLicenseController`
-
-Gets the license controller for managing module and feature access.
-
-```swift
-public func getLicenseController() -> LicenseController
-```
-
-**Returns:** `LicenseController` instance
-
-**Example:**
-```swift
-let licenseController = coreClient.getLicenseController()
-if licenseController.isModuleAllowed("PasspointProfileSDK") {
-    // Use Passpoint SDK
-}
-```
-
-## Service Architecture
-
-### UplinkServiceManager
-
-Singleton service manager for the Core SDK. Provides centralized access to the SDK client with lifecycle management.
-
-#### Getting the Service Instance
-
-```swift
-let service = UplinkServiceManager.shared
-```
-
-#### Service Lifecycle
-
-##### `initialize`
-
-Initializes the service with developer credentials. Authenticates with backend using appId/appSecret and receives JWT token.
-
-```swift
-@discardableResult
-public func initialize(
-    baseURL: String = "https://api-gateway.develop.uplink.xyz/v2",
-    appId: String,
-    appKey: String,
-    deviceInfo: DeviceInfo
-) async -> Bool
-```
-
-**Parameters:**
-- `baseURL`: Base URL for API communication (defaults to development server)
-- `appId`: Developer app ID
-- `appKey`: Developer app secret
-- `deviceInfo`: Device information
-
-**Returns:** `true` if initialization was successful, `false` if already initialized
-
-**Example:**
-```swift
-let initialized = await service.initialize(
-    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-    appId: "your-app-id",
-    appKey: "your-app-secret",
-    deviceInfo: deviceInfo
-)
-```
-
-##### `start`
-
-Starts the service. Service must be initialized before starting.
-
-```swift
-@discardableResult
-public func start() -> Bool
-```
-
-**Returns:** `true` if service was started, `false` if already running or not initialized
-
-**Example:**
-```swift
-let started = service.start()
-```
-
-##### `stop`
-
-Stops the service. This does not destroy the client, just marks the service as stopped.
-
-```swift
-@discardableResult
-public func stop() -> Bool
-```
-
-**Returns:** `true` if service was stopped, `false` if not running
-
-**Example:**
-```swift
-service.stop()
-```
-
-#### Service Status
-
-##### `getIsInitialized`
-
-Checks if the service is initialized.
-
-```swift
-public func getIsInitialized() -> Bool
-```
-
-**Returns:** `true` if initialized, `false` otherwise
-
-##### `getIsRunning`
-
-Checks if the service is running.
-
-```swift
-public func getIsRunning() -> Bool
-```
-
-**Returns:** `true` if running, `false` otherwise
-
-#### Getting the Core Client
-
-##### `getCoreClient`
-
-Gets the core client instance. Service must be initialized before accessing the client.
-
-```swift
-public func getCoreClient() -> UplinkCoreClient?
-```
-
-**Returns:** `UplinkCoreClient` instance or `nil` if not initialized
-
-**Example:**
-```swift
-let coreClient = service.getCoreClient()
-```
-
-#### Token Management
-
-##### `setAccessToken`
-
-Updates the access token for the current client.
-
-```swift
-public func setAccessToken(_ token: String?)
-```
-
-**Parameters:**
-- `token`: New access token (or `nil` to clear)
-
-## HTTP Client
-
-The `HttpClient` class provides methods for making HTTP requests to the backend API.
-
-### Request Methods
-
-#### `get`
-
-Performs a GET request.
-
-```swift
-public func get<T: Decodable>(
-    endpoint: String,
-    parameters: [String: Any]? = nil
-) async throws -> T
-```
-
-**Parameters:**
-- `endpoint`: API endpoint path (e.g., `"/mobile/subscriber/register"`)
-- `parameters`: Optional query parameters
-
-**Returns:** Deserialized response object of type `T`
+**Returns:** `IOSPasspointProfileResponse` containing profile data
 
 **Throws:** Error if the request fails
 
-**Example:**
-```swift
-let response: SubscriberResponse = try await httpClient.get(
-    endpoint: "/subscriber",
-    parameters: nil
-)
-```
-
-#### `post`
-
-Performs a POST request.
-
-```swift
-public func post<T: Decodable, B: Encodable>(
-    endpoint: String,
-    body: B
-) async throws -> T
-```
-
-**Parameters:**
-- `endpoint`: API endpoint path
-- `body`: Request body object (will be serialized to JSON)
-
-**Returns:** Deserialized response object of type `T`
-
-**Throws:** Error if the request fails
+**Note:** Automatically creates a subscriber if one doesn't exist
 
 **Example:**
-```swift
-let request = AppAuthRequest(appId: "app-id", appSecret: "app-secret")
-let response: AppAuthResponse = try await httpClient.post(
-    endpoint: "/auth/app",
-    body: request
-)
-```
-
-#### `delete`
-
-Performs a DELETE request.
-
-```swift
-public func delete(endpoint: String) async throws
-```
-
-**Parameters:**
-- `endpoint`: API endpoint path
-
-**Throws:** Error if the request fails
-
-#### `getFromUrl`
-
-Performs a GET request to an external URL (not using baseURL).
-
-```swift
-public func getFromUrl<T: Decodable>(url: String) async throws -> T
-```
-
-**Parameters:**
-- `url`: Full URL to request
-
-**Returns:** Deserialized response object of type `T`
-
-**Throws:** Error if the request fails
-
-**Example:**
-```swift
-let response: IOSPasspointProfileResponse = try await httpClient.getFromUrl(
-    url: "https://radiustest2.uplink.xyz/passpoint/sdk/ios"
-)
-```
-
-### Authentication Headers
-
-The HTTP client automatically adds the `Authorization: Bearer {token}` header to all requests when an access token is set.
-
-### Error Handling
-
-HTTP errors are thrown as `Error` types. The SDK uses Alamofire for HTTP requests, which provides detailed error information.
-
-**Example Error Handling:**
 ```swift
 do {
-    let response = try await httpClient.get(...)
+    let profileResponse = try await passpointClient.fetchIOSPasspointProfile()
+    // Use profileResponse to install profile
 } catch {
-    if let afError = error as? AFError {
-        switch afError {
-        case .responseValidationFailed:
-            print("Response validation failed")
-        case .responseSerializationFailed:
-            print("Response serialization failed")
-        default:
-            print("HTTP error: \(afError.localizedDescription)")
+    print("Failed to fetch profile: \(error.localizedDescription)")
+}
+```
+
+### Lifecycle Methods
+
+#### `checkForProfileUpdates`
+
+Manually triggers a poll check for profile updates. Useful for app launch scenarios or when push notifications fail.
+
+```swift
+public func checkForProfileUpdates() async throws
+```
+
+**Example:**
+```swift
+try await passpointClient.checkForProfileUpdates()
+```
+
+#### `shouldPollForUpdates`
+
+Checks if polling should be triggered (e.g., on app launch).
+
+```swift
+public func shouldPollForUpdates() -> Bool
+```
+
+**Returns:** `true` if polling should be triggered, `false` otherwise
+
+**Example:**
+```swift
+if passpointClient.shouldPollForUpdates() {
+    try await passpointClient.checkForProfileUpdates()
+}
+```
+
+#### `checkCertificateMonitoring`
+
+Manually triggers certificate monitoring check. Useful for testing or manual refresh.
+
+```swift
+public func checkCertificateMonitoring() async throws
+```
+
+**Example:**
+```swift
+try await passpointClient.checkCertificateMonitoring()
+```
+
+#### `checkRenewal`
+
+Manually triggers renewal check. Useful for testing or manual refresh.
+
+```swift
+public func checkRenewal() async throws
+```
+
+**Example:**
+```swift
+try await passpointClient.checkRenewal()
+```
+
+#### `stop`
+
+Stops all lifecycle services.
+
+```swift
+public func stop()
+```
+
+**Example:**
+```swift
+passpointClient.stop()
+```
+
+### Notification Handler
+
+#### `getNotificationHandler`
+
+Gets the notification handler for push notification integration.
+
+```swift
+public func getNotificationHandler() -> PasspointNotificationHandler
+```
+
+**Returns:** `PasspointNotificationHandler` instance
+
+**Example:**
+```swift
+let notificationHandler = passpointClient.getNotificationHandler()
+// Use notificationHandler to handle push notifications
+```
+
+### Logging Utilities
+
+#### `getLogFilePath`
+
+Gets the log file path.
+
+```swift
+public func getLogFilePath() -> String?
+```
+
+**Returns:** Path to the Passpoint SDK log file, or `nil` if unavailable
+
+#### `readLogFile`
+
+Reads the log file contents.
+
+```swift
+public func readLogFile() -> String?
+```
+
+**Returns:** Full contents of the Passpoint SDK log file, or `nil` if unavailable
+
+#### `getLogFileURL`
+
+Gets the log file URL for sharing.
+
+```swift
+public func getLogFileURL() -> URL?
+```
+
+**Returns:** URL to the log file, or `nil` if unavailable
+
+## PasspointProfileManager
+
+Manages Passpoint profile operations including installation, listing, removal, and validation.
+
+### Profile Installation
+
+#### `installProfile`
+
+Installs a Passpoint profile programmatically.
+
+```swift
+public func installProfile(_ profile: PasspointProfile) async throws -> ProfileInstallResult
+```
+
+**Parameters:**
+- `profile`: The Passpoint profile to install
+
+**Returns:** `ProfileInstallResult` containing installation status
+
+**Throws:** Error if installation fails
+
+**Example:**
+```swift
+let profile = PasspointProfile(
+    id: "profile-123",
+    friendlyName: "My Network",
+    realm: "example.com",
+    fqdn: "wifi.example.com",
+    homeSpFqdn: "wifi.example.com",
+    credential: PasspointCredential(
+        username: "user@example.com",
+        password: "password",
+        realm: "example.com"
+    )
+)
+
+do {
+    let result = try await profileManager.installProfile(profile)
+    if result.success {
+        print("Profile installed: \(result.profileId ?? "unknown")")
+    } else {
+        print("Installation failed: \(result.errorMessage ?? "Unknown error")")
+    }
+} catch {
+    print("Installation error: \(error.localizedDescription)")
+}
+```
+
+#### `installProfileFromResponse`
+
+Installs a Passpoint profile from API response with retry logic.
+
+```swift
+public func installProfileFromResponse(_ profileResponse: IOSPasspointProfileResponse) async throws -> ProfileInstallResult
+```
+
+**Parameters:**
+- `profileResponse`: The iOS Passpoint profile response from API
+
+**Returns:** `ProfileInstallResult` containing installation status
+
+**Throws:** Error if installation fails
+
+**Note:** Automatically checks for duplicate profiles before installation
+
+**Example:**
+```swift
+do {
+    let profileResponse = try await passpointClient.fetchIOSPasspointProfile()
+    let result = try await profileManager.installProfileFromResponse(profileResponse)
+    if result.success {
+        print("Profile installed successfully")
+    }
+} catch {
+    print("Failed to install profile: \(error.localizedDescription)")
+}
+```
+
+### Profile Listing
+
+#### `listProfiles`
+
+Lists all installed Passpoint profiles.
+
+```swift
+public func listProfiles() async throws -> [PasspointProfile]
+```
+
+**Returns:** Array of installed Passpoint profiles
+
+**Throws:** Error if listing fails
+
+**Note:** iOS API limitations mean this uses a local cache. Only profiles installed via the SDK will be listed.
+
+**Example:**
+```swift
+do {
+    let profiles = try await profileManager.listProfiles()
+    print("Found \(profiles.count) installed profiles")
+    for profile in profiles {
+        print("Profile: \(profile.friendlyName) (\(profile.fqdn))")
+    }
+} catch {
+    print("Failed to list profiles: \(error.localizedDescription)")
+}
+```
+
+### Profile Removal
+
+#### `removeProfile`
+
+Removes a Passpoint profile.
+
+```swift
+public func removeProfile(_ profileId: String) async throws
+```
+
+**Parameters:**
+- `profileId`: The ID of the profile to remove (can be uniqueId or fqdn)
+
+**Throws:** Error if removal fails
+
+**Important:** iOS does not support programmatic removal of Passpoint profiles. This method will:
+1. Clean up the cached profile data
+2. Throw an error indicating the iOS limitation
+3. Users must remove profiles manually from Settings > Wi-Fi > Passpoint profiles
+
+**Example:**
+```swift
+do {
+    try await profileManager.removeProfile("profile-123")
+    print("Profile removed successfully")
+} catch {
+    print("Failed to remove profile: \(error.localizedDescription)")
+    // On iOS, this will always fail with a limitation error
+    // The cache is cleaned up, but the system profile remains
+}
+```
+
+### Profile Validation
+
+#### `verifyProfile`
+
+Verifies if a Passpoint profile is valid.
+
+```swift
+public func verifyProfile(_ profile: PasspointProfile) async throws -> ProfileValidationResult
+```
+
+**Parameters:**
+- `profile`: The profile to validate
+
+**Returns:** `ProfileValidationResult` containing validation details
+
+**Throws:** Error if validation fails
+
+**Example:**
+```swift
+do {
+    let result = try await profileManager.verifyProfile(profile)
+    if result.isValid {
+        print("Profile is valid")
+        if result.isExpired {
+            print("Profile certificate is expired")
         }
     } else {
-        print("Error: \(error.localizedDescription)")
+        print("Profile validation failed: \(result.errorMessage ?? "Unknown error")")
     }
+} catch {
+    print("Validation error: \(error.localizedDescription)")
 }
 ```
 
-## License Controller
+### Permission/Entitlement Management
 
-The `LicenseController` class manages access to SDK modules and features based on license information.
+#### `checkPermissions`
 
-### Setting a License
+Checks if all required permissions/entitlements are present.
 
 ```swift
-public func setLicense(_ licenseInfo: LicenseInfo)
+public func checkPermissions() -> PermissionStatus
+```
+
+**Returns:** `PermissionStatus` with details about permission state
+
+**Example:**
+```swift
+let permissionStatus = profileManager.checkPermissions()
+if permissionStatus.allPresent {
+    // Proceed with Passpoint operations
+} else {
+    print("Missing entitlements: \(permissionStatus.missingPermissions.joined(separator: ", "))")
+}
+```
+
+#### `validateEntitlements`
+
+Validates entitlements for Passpoint operations.
+
+```swift
+public func validateEntitlements() -> EntitlementStatus
+```
+
+**Returns:** `EntitlementStatus` with details about entitlement state
+
+**Example:**
+```swift
+let entitlementStatus = profileManager.validateEntitlements()
+if entitlementStatus.allPresent {
+    // Entitlements are valid
+} else {
+    print("Missing entitlements: \(entitlementStatus.missingEntitlements.joined(separator: ", "))")
+}
+```
+
+#### `getMissingEntitlements`
+
+Gets list of missing entitlements.
+
+```swift
+public func getMissingEntitlements() -> [String]
+```
+
+**Returns:** List of entitlement keys that are not present
+
+**Example:**
+```swift
+let missing = profileManager.getMissingEntitlements()
+if !missing.isEmpty {
+    print("Missing entitlements: \(missing.joined(separator: ", "))")
+}
+```
+
+### Profile Information
+
+#### `getProfileInfo`
+
+Gets profile information for display in app settings.
+
+```swift
+public func getProfileInfo(profileId: String) async throws -> PasspointProfileInfo?
 ```
 
 **Parameters:**
-- `licenseInfo`: License information containing allowed modules and features
+- `profileId`: The ID of the profile
+
+**Returns:** Profile information or `nil` if not found
 
 **Example:**
-```swift
-let expirationDate = Calendar.current.date(byAdding: .year, value: 1, to: Date())
-let licenseInfo = LicenseInfo(
-    licenseKey: "LICENSE-KEY-123",
-    features: ["profile-installation", "profile-management"],
-    modules: ["PasspointProfileSDK", "NetworkSDK"],
-    expirationDate: expirationDate,
-    isActive: true
-)
-
-licenseController.setLicense(licenseInfo)
-```
-
-### Checking Module Access
-
-```swift
-public func isModuleAllowed(_ moduleName: String) -> Bool
-```
-
-**Parameters:**
-- `moduleName`: Name of the module to check (e.g., `"PasspointProfileSDK"`)
-
-**Returns:** `true` if the module is allowed, `false` otherwise
-
-**Example:**
-```swift
-if licenseController.isModuleAllowed("PasspointProfileSDK") {
-    // Use Passpoint Profile SDK
-} else {
-    // Handle access denied
-}
-```
-
-### Checking Feature Access
-
-```swift
-public func isFeatureAllowed(_ featureName: String) -> Bool
-```
-
-**Parameters:**
-- `featureName`: Name of the feature to check (e.g., `"profile-installation"`)
-
-**Returns:** `true` if the feature is allowed, `false` otherwise
-
-**Example:**
-```swift
-if licenseController.isFeatureAllowed("profile-installation") {
-    // Use profile installation feature
-} else {
-    // Handle access denied
-}
-```
-
-### License Validation
-
-```swift
-public func isLicenseValid() -> Bool
-```
-
-**Returns:** `true` if license is active and not expired, `false` otherwise
-
-**Example:**
-```swift
-if licenseController.isLicenseValid() {
-    // License is valid
-} else {
-    // License is invalid or expired
-}
-```
-
-### Getting License Information
-
-```swift
-public func getLicense() -> LicenseInfo?
-public func getAllowedModules() -> Set<String>
-public func getAllowedFeatures() -> Set<String>
-```
-
-**Example:**
-```swift
-if let license = licenseController.getLicense() {
-    print("License Key: \(license.licenseKey)")
-    print("Allowed Modules: \(license.modules)")
-    print("Allowed Features: \(license.features)")
-}
-
-let allowedModules = licenseController.getAllowedModules()
-let allowedFeatures = licenseController.getAllowedFeatures()
-```
-
-### Clearing License
-
-```swift
-public func clearLicense()
-```
-
-Clears the current license information.
-
-## Data Models
-
-### DeviceInfo
-
-Device information structure for registration.
-
-```swift
-public struct DeviceInfo {
-    public let deviceId: String
-    public let deviceModel: String
-    public let osVersion: String
-    public let osType: String
-}
-```
-
-### LicenseInfo
-
-License information structure.
-
-```swift
-public struct LicenseInfo {
-    public let licenseKey: String
-    public let features: Set<String>
-    public let modules: Set<String>
-    public let expirationDate: Date? // nil for perpetual licenses
-    public let isActive: Bool
-}
-```
-
-## Error Handling
-
-The Core SDK uses Swift's standard error handling with `Error` protocol. HTTP errors are typically `AFError` from Alamofire.
-
-**Example Error Handling:**
 ```swift
 do {
-    let coreClient = await UplinkCoreClient.create(...)
+    if let profileInfo = try await profileManager.getProfileInfo("profile-123") {
+        print("Profile installed: \(profileInfo.installationDate)")
+        print("Profile expires: \(profileInfo.expirationDate?.description ?? "Never")")
+        print("Profile status: \(profileInfo.status)")
+    }
 } catch {
-    print("Error: \(error.localizedDescription)")
-    // Handle error appropriately
+    print("Failed to get profile info: \(error.localizedDescription)")
 }
 ```
 
-## Best Practices
+#### `getAllProfileInfo`
 
-1. **Initialize Early**: Initialize the Core SDK in your `AppDelegate.application(_:didFinishLaunchingWithOptions:)` method
-2. **Use Service Pattern**: Use `UplinkServiceManager.shared` for singleton access to the client
-3. **Handle Errors**: Always wrap SDK calls in do-catch blocks
-4. **Check Authentication**: Verify `getIsAuthenticated()` before making authenticated requests
-5. **Refresh Tokens**: The SDK automatically refreshes tokens, but you can manually call `refreshTokenIfNeeded()` if needed
-6. **License Validation**: Always check license validity before using SDK modules
-7. **Use async/await**: The SDK uses modern Swift concurrency, so use async/await for all SDK calls
+Gets profile information for all installed profiles.
 
-## Related Documentation
-
-- [Passpoint SDK API Reference](../ios/passpoint-sdk.md)
-- [API Endpoints](../api-endpoints.md)
-- [Getting Started Guide](../ios/getting-started.md)
-
-): T
+```swift
+public func getAllProfileInfo() async throws -> [PasspointProfileInfo]
 ```
 
-**Parameters:**
-- `endpoint`: API endpoint path
-- `body`: Request body object (will be serialized to JSON)
-
-**Returns:** Deserialized response object of type `T`
-
-**Throws:** `ApiException` if the request fails
-
-#### `delete`
-
-Performs a DELETE request.
-
-```kotlin
-suspend fun delete(endpoint: String)
-```
-
-**Parameters:**
-- `endpoint`: API endpoint path
-
-**Throws:** `ApiException` if the request fails
-
-#### `getFromUrl`
-
-Performs a GET request to an external URL (not using baseUrl).
-
-```kotlin
-suspend inline fun <reified T> getFromUrl(url: String): T
-```
-
-**Parameters:**
-- `url`: Full URL to request
-
-**Returns:** Deserialized response object of type `T`
-
-**Throws:** `ApiException` if the request fails
-
-### Authentication Headers
-
-The HTTP client automatically adds the `Authorization: Bearer {token}` header to all requests when an access token is set.
-
-### Error Handling
-
-The HTTP client maps HTTP errors to `ApiException` types:
-- `401 Unauthorized` → `ApiException.Unauthorized`
-- `404 Not Found` → `ApiException.NotFound`
-- `400 Bad Request` → `ApiException.BadRequest`
-- `500/502/503 Server Error` → `ApiException.ServerError`
-- Network errors → `ApiException.NetworkError`
-- Other errors → `ApiException.Unknown`
-
-## License Controller
-
-The `LicenseController` class manages access to SDK modules and features based on license information.
-
-### Setting a License
-
-```kotlin
-fun setLicense(licenseInfo: LicenseInfo)
-```
-
-**Parameters:**
-- `licenseInfo`: License information containing allowed modules and features
+**Returns:** Array of profile information
 
 **Example:**
-```kotlin
-val licenseInfo = LicenseInfo(
-    licenseKey = "LICENSE-KEY-123",
-    features = setOf("profile-installation", "profile-management"),
-    modules = setOf("passpoint-profile-sdk", "network-sdk"),
-    expirationDate = System.currentTimeMillis() / 1000 + (365 * 24 * 60 * 60), // 1 year from now
-    isActive = true
-)
-
-licenseController.setLicense(licenseInfo)
-```
-
-### Checking Module Access
-
-```kotlin
-fun isModuleAllowed(moduleName: String): Boolean
-```
-
-**Parameters:**
-- `moduleName`: Name of the module to check (e.g., `"passpoint-profile-sdk"`)
-
-**Returns:** `true` if the module is allowed, `false` otherwise
-
-**Example:**
-```kotlin
-if (licenseController.isModuleAllowed("passpoint-profile-sdk")) {
-    // Use Passpoint Profile SDK
-} else {
-    // Handle access denied
+```swift
+do {
+    let allProfileInfo = try await profileManager.getAllProfileInfo()
+    for info in allProfileInfo {
+        print("Profile \(info.profileId): \(info.status)")
+    }
+} catch {
+    print("Failed to get profile info: \(error.localizedDescription)")
 }
 ```
 
-### Checking Feature Access
+### Logging Utilities
 
-```kotlin
-fun isFeatureAllowed(featureName: String): Boolean
-```
+The profile manager also provides logging utilities (same as `UplinkPasspointClient`):
 
-**Parameters:**
-- `featureName`: Name of the feature to check (e.g., `"profile-installation"`)
-
-**Returns:** `true` if the feature is allowed, `false` otherwise
-
-**Example:**
-```kotlin
-if (licenseController.isFeatureAllowed("profile-installation")) {
-    // Use profile installation feature
-} else {
-    // Handle access denied
-}
-```
-
-### License Validation
-
-```kotlin
-fun isLicenseValid(): Boolean
-```
-
-**Returns:** `true` if license is active and not expired, `false` otherwise
-
-**Example:**
-```kotlin
-if (licenseController.isLicenseValid()) {
-    // License is valid
-} else {
-    // License is invalid or expired
-}
-```
-
-### Getting License Information
-
-```kotlin
-fun getLicense(): LicenseInfo?
-fun getAllowedModules(): Set<String>
-fun getAllowedFeatures(): Set<String>
-```
-
-**Example:**
-```kotlin
-val license = licenseController.getLicense()
-val allowedModules = licenseController.getAllowedModules()
-val allowedFeatures = licenseController.getAllowedFeatures()
-```
-
-### Clearing License
-
-```kotlin
-fun clearLicense()
-```
-
-Clears the current license information.
+- `getLogFilePath() -> String?`
+- `readLogFile() -> String?`
+- `getLogFileURL() -> URL?`
 
 ## Data Models
 
-### DeviceInfo
+### PasspointProfile
 
-Device information structure for registration.
+Represents a Passpoint profile.
 
-```kotlin
-data class DeviceInfo(
-    val deviceId: String,
-    val deviceModel: String,
-    val osVersion: String,
-    val osType: String
-)
-```
-
-### LicenseInfo
-
-License information structure.
-
-```kotlin
-data class LicenseInfo(
-    val licenseKey: String,
-    val features: Set<String>,
-    val modules: Set<String>,
-    val expirationDate: Long? = null, // Unix timestamp, null for perpetual
-    val isActive: Boolean = true
-)
-```
-
-## Error Handling
-
-The Core SDK uses a sealed class hierarchy for API exceptions:
-
-```kotlin
-sealed class ApiException(message: String, cause: Throwable? = null) : Exception(message, cause) {
-    class Unauthorized(message: String, cause: Throwable? = null) : ApiException(message, cause)
-    class NotFound(message: String, cause: Throwable? = null) : ApiException(message, cause)
-    class BadRequest(message: String, cause: Throwable? = null) : ApiException(message, cause)
-    class ServerError(message: String, cause: Throwable? = null) : ApiException(message, cause)
-    class NetworkError(message: String, cause: Throwable? = null) : ApiException(message, cause)
-    class Unknown(message: String, cause: Throwable? = null) : ApiException(message, cause)
+```swift
+public struct PasspointProfile: Codable {
+    public let id: String?
+    public let friendlyName: String
+    public let realm: String
+    public let fqdn: String
+    public let homeSpFqdn: String
+    public let credential: PasspointCredential
+    public let policy: PasspointPolicy?
+    public let metadata: [String: String]?
 }
 ```
 
-**Example Error Handling:**
-```kotlin
-try {
-    val coreClient = UplinkCoreClient.create(...)
-} catch (e: ApiException.Unauthorized) {
-    Log.e("App", "Authentication failed: ${e.message}")
-} catch (e: ApiException.NetworkError) {
-    Log.e("App", "Network error: ${e.message}")
-} catch (e: ApiException) {
-    Log.e("App", "API error: ${e.message}")
+### PasspointCredential
+
+Represents Passpoint credentials.
+
+```swift
+public struct PasspointCredential: Codable {
+    public let username: String?
+    public let password: String?
+    public let certificate: String? // Base64 encoded
+    public let privateKey: String? // Base64 encoded
+    public let realm: String
+}
+```
+
+### PasspointPolicy
+
+Represents Passpoint policy settings.
+
+```swift
+public struct PasspointPolicy: Codable {
+    public let minHomeDownlinkBandwidth: Int?
+    public let minHomeUplinkBandwidth: Int?
+    public let minRoamingDownlinkBandwidth: Int?
+    public let minRoamingUplinkBandwidth: Int?
+    public let excludedSsidList: [String]?
+    public let maximumBssLoadValue: Int?
+}
+```
+
+### ProfileInstallResult
+
+Result of profile installation.
+
+```swift
+public struct ProfileInstallResult {
+    public let success: Bool
+    public let profileId: String?
+    public let errorMessage: String?
+    public let errorCode: Int?
+}
+```
+
+### ProfileValidationResult
+
+Result of profile validation.
+
+```swift
+public struct ProfileValidationResult {
+    public let isValid: Bool
+    public let isExpired: Bool
+    public let expirationDate: Date?
+    public let certificateValid: Bool
+    public let errorMessage: String?
+}
+```
+
+### IOSPasspointProfileResponse
+
+Response model from the iOS Passpoint profile API endpoint.
+
+```swift
+public struct IOSPasspointProfileResponse: Codable {
+    public let schemaVersion: Int
+    public let profileId: String
+    public let profileName: String
+    public let homeSp: HomeSp
+    public let eap: Eap
+    public let credential: Credential
+    public let trust: Trust
+}
+```
+
+## Lifecycle Management
+
+The SDK provides automatic lifecycle management through the `PasspointLifecycleOrchestrator`. This includes:
+
+- **Profile Polling**: Checks for profile updates at least once daily (requires background task registration)
+- **Certificate Monitoring**: Monitors certificate expiration dates
+- **Renewal Scheduling**: Automatically renews profiles 90 days before expiration
+- **Installation Retry**: Retries failed installations with exponential backoff
+
+See [Lifecycle Management](../lifecycle-management.md) for detailed documentation.
+
+## Error Handling
+
+### PasspointErrorCallback
+
+Protocol for receiving installation error notifications.
+
+```swift
+public protocol PasspointErrorCallback {
+    func onInstallationError(error: Error, attempt: Int, willRetry: Bool)
+}
+```
+
+**Parameters:**
+- `error`: The error that occurred
+- `attempt`: The current attempt number (1-based)
+- `willRetry`: Whether the system will retry the installation
+
+**Example:**
+```swift
+class MyErrorCallback: PasspointErrorCallback {
+    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
+        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
+        
+        if !willRetry {
+            // Final failure, notify user
+            showErrorToUser("Failed to install profile: \(error.localizedDescription)")
+        }
+    }
+}
+
+let passpointClient = UplinkPasspointClient(
+    coreClient: coreClient,
+    errorCallback: MyErrorCallback()
+)
+```
+
+### Error Types
+
+The SDK may throw various errors:
+- `PasspointPermissionError`: Missing entitlements
+- `NSError`: System errors (domain: "PasspointProfileInstaller", "PasspointProfileRemover", etc.)
+- Network errors from HTTP client
+
+See [Error Handling](../error-handling.md) for detailed documentation.
+
+## Background Task Registration
+
+iOS requires background task registration for polling. Add to your `Info.plist`:
+
+```xml
+<key>BGTaskSchedulerPermittedIdentifiers</key>
+<array>
+    <string>com.uplink.passpoint.profilePolling</string>
+</array>
+```
+
+Register in `AppDelegate`:
+
+```swift
+func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    PasspointProfilePoller.registerBackgroundTask()
+    return true
 }
 ```
 
 ## Best Practices
 
-1. **Initialize Early**: Initialize the Core SDK in your `Application.onCreate()` method
-2. **Use Service Pattern**: Use `UplinkService` for singleton access to the client
-3. **Handle Errors**: Always wrap SDK calls in try-catch blocks
-4. **Check Authentication**: Verify `isAuthenticated()` before making authenticated requests
-5. **Refresh Tokens**: The SDK automatically refreshes tokens, but you can manually call `refreshTokenIfNeeded()` if needed
-6. **License Validation**: Always check license validity before using SDK modules
+1. **Initialize Once**: Create the Passpoint client once and reuse it
+2. **Check Entitlements**: Always check entitlements before operations
+3. **Handle Errors**: Implement `PasspointErrorCallback` for error notifications
+4. **Use Lifecycle Management**: Let the SDK handle automatic polling and renewal
+5. **Register Background Tasks**: Ensure background task registration for polling
+6. **Handle iOS Limitations**: Inform users about manual profile removal requirement
+7. **Use async/await**: The SDK uses modern Swift concurrency
 
 ## Related Documentation
 
-- [Passpoint SDK API Reference](../android/passpoint-sdk.md)
-- [API Endpoints](../api-endpoints.md)
-- [Getting Started Guide](../android/getting-started.md)
+- [Core SDK API Reference](core-sdk.md)
+- [Entitlements Guide](entitlements.md)
+- [Getting Started Guide](getting-started.md)
+- [Lifecycle Management](../lifecycle-management.md)
+- [Error Handling](../error-handling.md)
+- [Code Examples](examples.md)
