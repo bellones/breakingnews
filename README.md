@@ -1,4 +1,4 @@
-# Overview
+## Overview
 
 The Uplink Core SDK provides foundational services for authentication, HTTP communication, logging, task scheduling, and license management. It serves as the base layer for all Uplink SDK modules.
 
@@ -8,46 +8,63 @@ The main client class for the Core SDK. Provides access to authentication, HTTP 
 
 ### Initialization
 
-#### `create`
+#### `init`
 
-Creates a new Core SDK client instance and authenticates with the backend.
+Creates a new Core SDK client instance without authentication.
 
-```kotlin
-suspend fun create(
-    baseUrl: String,
-    appId: String,
-    appSecret: String,
-    deviceInfo: DeviceInfo,
-    context: Context? = null
-): UplinkCoreClient
+```swift
+public init(baseURL: String? = nil, accessToken: String? = nil)
 ```
 
 **Parameters:**
-- `baseUrl`: Base URL for API communication (e.g., `"https://api-gateway.develop.uplink.xyz/v2"`)
+- `baseURL`: Optional base URL for API communication
+- `accessToken`: Optional access token for authenticated requests
+
+**Example:**
+```swift
+let coreClient = UplinkCoreClient(
+    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+    accessToken: nil
+)
+```
+
+#### `create`
+
+Creates a new Core SDK client instance with authentication.
+
+```swift
+public static func create(
+    baseURL: String,
+    appId: String,
+    appSecret: String,
+    deviceInfo: DeviceInfo
+) async -> UplinkCoreClient
+```
+
+**Parameters:**
+- `baseURL`: Base URL for API communication (e.g., `"https://api-gateway.develop.uplink.xyz/v2"`)
 - `appId`: Developer application ID
 - `appSecret`: Developer application secret
 - `deviceInfo`: Device information for registration
-- `context`: Application context (optional, required for credential storage)
 
 **Returns:** Authenticated `UplinkCoreClient` instance
 
-**Throws:** `ApiException` if authentication fails
+**Throws:** Error if authentication fails
 
 **Example:**
-```kotlin
-val deviceInfo = DeviceInfo(
-    deviceId = getDeviceId(),
-    deviceModel = Build.MODEL,
-    osVersion = Build.VERSION.RELEASE,
-    osType = "Android"
+```swift
+let deviceInfo = DeviceInfo(
+    deviceId: getDeviceId(),
+    deviceModel: UIDevice.current.model,
+    osVersion: UIDevice.current.systemVersion,
+    osType: "iOS"
 )
 
-val coreClient = UplinkCoreClient.create(
-    baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
-    appId = "your-app-id",
-    appSecret = "your-app-secret",
-    deviceInfo = deviceInfo,
-    context = applicationContext
+let coreClient = await UplinkCoreClient.create(
+    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+    appId: "your-app-id",
+    appSecret: "your-app-secret",
+    deviceInfo: deviceInfo
 )
 ```
 
@@ -55,58 +72,26 @@ val coreClient = UplinkCoreClient.create(
 
 Gets the core client from the service singleton. Initializes and starts the service if not already done.
 
-```kotlin
-suspend fun fromService(
-    baseUrl: String = "https://api-gateway.develop.uplink.xyz/v2",
-    appId: String,
-    appSecret: String,
-    deviceInfo: DeviceInfo,
-    context: Context? = null
-): UplinkCoreClient?
+```swift
+public static func fromService(
+    baseURL: String? = nil,
+    accessToken: String? = nil
+) -> UplinkCoreClient?
 ```
 
 **Parameters:**
-- `baseUrl`: Base URL for API communication (defaults to development server)
-- `appId`: Developer application ID
-- `appSecret`: Developer application secret
-- `deviceInfo`: Device information for registration
-- `context`: Application context (optional, required for credential storage)
+- `baseURL`: Optional base URL for API communication
+- `accessToken`: Optional access token for authenticated requests
 
-**Returns:** `UplinkCoreClient` instance from the service, or `null` if service initialization fails
+**Returns:** `UplinkCoreClient` instance from the service, or `nil` if service is not initialized
 
-**Example:**
-```kotlin
-val coreClient = UplinkCoreClient.fromService(
-    baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
-    appId = "your-app-id",
-    appSecret = "your-app-secret",
-    deviceInfo = deviceInfo,
-    context = applicationContext
-)
-```
-
-#### `createMock`
-
-Creates a mock Core SDK client instance for testing. Skips authentication and initializes with mock values.
-
-```kotlin
-fun createMock(
-    baseUrl: String = "https://api-gateway.develop.uplink.xyz/v2",
-    context: Context? = null
-): UplinkCoreClient
-```
-
-**Parameters:**
-- `baseUrl`: Base URL for API communication (defaults to development server)
-- `context`: Application context (optional)
-
-**Returns:** Mock `UplinkCoreClient` instance with mock authentication
+**Note:** The service must be initialized separately using `UplinkServiceManager.shared.initialize()`
 
 **Example:**
-```kotlin
-val mockClient = UplinkCoreClient.createMock(
-    baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
-    context = applicationContext
+```swift
+let coreClient = UplinkCoreClient.fromService(
+    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+    accessToken: nil
 )
 ```
 
@@ -116,19 +101,13 @@ val mockClient = UplinkCoreClient.createMock(
 
 Refreshes the authentication token if it has expired. Re-authenticates using stored credentials.
 
-```kotlin
-suspend fun refreshTokenIfNeeded()
+```swift
+public func refreshTokenIfNeeded() async
 ```
 
-**Throws:** `ApiException` if re-authentication fails
-
 **Example:**
-```kotlin
-try {
-    coreClient.refreshTokenIfNeeded()
-} catch (e: ApiException) {
-    Log.e("App", "Failed to refresh token: ${e.message}")
-}
+```swift
+await coreClient.refreshTokenIfNeeded()
 ```
 
 ### Subscriber Management
@@ -137,19 +116,21 @@ try {
 
 Creates a subscriber manually. Uses organizationId from the stored JWT token.
 
-```kotlin
-suspend fun createSubscriber(): Result<SubscriberResponse>
+```swift
+public func createSubscriber() async throws -> SubscriberResponse
 ```
 
-**Returns:** `Result<SubscriberResponse>` containing subscriber ID or error
+**Returns:** `SubscriberResponse` containing subscriber ID
+
+**Throws:** Error if subscriber creation fails
 
 **Example:**
-```kotlin
-val result = coreClient.createSubscriber()
-result.onSuccess { subscriber ->
-    Log.i("App", "Subscriber created: ${subscriber.subscriberId}")
-}.onFailure { error ->
-    Log.e("App", "Failed to create subscriber: ${error.message}")
+```swift
+do {
+    let subscriber = try await coreClient.createSubscriber()
+    print("Subscriber created: \(subscriber.subscriberId)")
+} catch {
+    print("Failed to create subscriber: \(error.localizedDescription)")
 }
 ```
 
@@ -159,137 +140,113 @@ result.onSuccess { subscriber ->
 
 Updates the access token for API requests.
 
-```kotlin
-fun setAccessToken(token: String?)
+```swift
+public func setAccessToken(_ token: String?)
 ```
 
 **Parameters:**
-- `token`: New access token (or `null` to clear)
+- `token`: New access token (or `nil` to clear)
 
 **Example:**
-```kotlin
+```swift
 coreClient.setAccessToken("new-jwt-token")
 ```
 
-#### `isAuthenticated`
+#### `getIsAuthenticated`
 
 Checks if the client is authenticated.
 
-```kotlin
-fun isAuthenticated(): Boolean
+```swift
+public func getIsAuthenticated() -> Bool
 ```
 
 **Returns:** `true` if authenticated, `false` otherwise
 
 **Example:**
-```kotlin
-if (coreClient.isAuthenticated()) {
+```swift
+if coreClient.getIsAuthenticated() {
     // Proceed with authenticated operations
 }
 ```
 
 ### Utility Accessors
 
-#### `httpClient`
+#### `getHttpClient`
 
 Gets the HTTP client for API communication.
 
-```kotlin
-fun httpClient(): HttpClient
+```swift
+public func getHttpClient() -> HttpClient?
 ```
 
-**Returns:** `HttpClient` instance
+**Returns:** `HttpClient` instance or `nil` if not initialized
 
 **Example:**
-```kotlin
-val httpClient = coreClient.httpClient()
+```swift
+if let httpClient = coreClient.getHttpClient() {
+    // Use HTTP client
+}
 ```
 
-#### `taskScheduler`
+#### `getTaskScheduler`
 
 Gets the periodic task scheduler.
 
-```kotlin
-fun taskScheduler(): PeriodicTaskScheduler
+```swift
+public func getTaskScheduler() -> PeriodicTaskScheduler
 ```
 
 **Returns:** `PeriodicTaskScheduler` instance
 
 **Example:**
-```kotlin
-val scheduler = coreClient.taskScheduler()
+```swift
+let scheduler = coreClient.getTaskScheduler()
 ```
 
-#### `logger`
+#### `getLogger`
 
 Gets the logger utility.
 
-```kotlin
-fun logger(): Logger
+```swift
+public func getLogger() -> Logger
 ```
 
 **Returns:** `Logger` instance
 
 **Example:**
-```kotlin
-val logger = coreClient.logger()
+```swift
+let logger = coreClient.getLogger()
 logger.info("Application started")
 ```
 
-#### `licenseController`
+#### `getLicenseController`
 
 Gets the license controller for managing module and feature access.
 
-```kotlin
-fun licenseController(): LicenseController
+```swift
+public func getLicenseController() -> LicenseController
 ```
 
 **Returns:** `LicenseController` instance
 
 **Example:**
-```kotlin
-val licenseController = coreClient.licenseController()
-if (licenseController.isModuleAllowed("passpoint-profile-sdk")) {
+```swift
+let licenseController = coreClient.getLicenseController()
+if licenseController.isModuleAllowed("PasspointProfileSDK") {
     // Use Passpoint SDK
-}
-```
-
-### Passpoint Profile Fetching
-
-#### `getAndroidPasspointProfile`
-
-Gets Android Passpoint profile from the backend API with automatic subscriber creation.
-
-```kotlin
-suspend fun getAndroidPasspointProfile(): AndroidPasspointProfileResponse
-```
-
-**Returns:** `AndroidPasspointProfileResponse` containing profile data
-
-**Throws:** `ApiException` if the request fails
-
-**Note:** Automatically creates a subscriber if one doesn't exist
-
-**Example:**
-```kotlin
-try {
-    val profileResponse = coreClient.getAndroidPasspointProfile()
-    // Use profileResponse to install profile
-} catch (e: ApiException) {
-    Log.e("App", "Failed to fetch profile: ${e.message}")
 }
 ```
 
 ## Service Architecture
 
-### UplinkService
+### UplinkServiceManager
 
 Singleton service manager for the Core SDK. Provides centralized access to the SDK client with lifecycle management.
 
 #### Getting the Service Instance
 
-```kotlin
-val service = UplinkService.getInstance()
+```swift
+let service = UplinkServiceManager.shared
 ```
 
 #### Service Lifecycle
@@ -298,33 +255,31 @@ val service = UplinkService.getInstance()
 
 Initializes the service with developer credentials. Authenticates with backend using appId/appSecret and receives JWT token.
 
-```kotlin
-suspend fun initialize(
-    baseUrl: String = "https://api-gateway.develop.uplink.xyz/v2",
+```swift
+@discardableResult
+public func initialize(
+    baseURL: String = "https://api-gateway.develop.uplink.xyz/v2",
     appId: String,
-    appSecret: String,
-    deviceInfo: DeviceInfo,
-    context: Context? = null
-): Boolean
+    appKey: String,
+    deviceInfo: DeviceInfo
+) async -> Bool
 ```
 
 **Parameters:**
-- `baseUrl`: Base URL for API communication (defaults to development server)
+- `baseURL`: Base URL for API communication (defaults to development server)
 - `appId`: Developer app ID
-- `appSecret`: Developer app secret
+- `appKey`: Developer app secret
 - `deviceInfo`: Device information
-- `context`: Application context (optional, required for credential storage)
 
 **Returns:** `true` if initialization was successful, `false` if already initialized
 
 **Example:**
-```kotlin
-val initialized = service.initialize(
-    baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
-    appId = "your-app-id",
-    appSecret = "your-app-secret",
-    deviceInfo = deviceInfo,
-    context = applicationContext
+```swift
+let initialized = await service.initialize(
+    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+    appId: "your-app-id",
+    appKey: "your-app-secret",
+    deviceInfo: deviceInfo
 )
 ```
 
@@ -332,50 +287,52 @@ val initialized = service.initialize(
 
 Starts the service. Service must be initialized before starting.
 
-```kotlin
-suspend fun start(): Boolean
+```swift
+@discardableResult
+public func start() -> Bool
 ```
 
 **Returns:** `true` if service was started, `false` if already running or not initialized
 
 **Example:**
-```kotlin
-val started = service.start()
+```swift
+let started = service.start()
 ```
 
 ##### `stop`
 
 Stops the service. This does not destroy the client, just marks the service as stopped.
 
-```kotlin
-suspend fun stop(): Boolean
+```swift
+@discardableResult
+public func stop() -> Bool
 ```
 
 **Returns:** `true` if service was stopped, `false` if not running
 
 **Example:**
-```kotlin
+```swift
 service.stop()
 ```
 
 #### Service Status
 
-##### `isInitialized`
+##### `getIsInitialized`
 
 Checks if the service is initialized.
 
-```kotlin
-suspend fun isInitialized(): Boolean
+```swift
+public func getIsInitialized() -> Bool
 ```
 
 **Returns:** `true` if initialized, `false` otherwise
 
-##### `isRunning`
+##### `getIsRunning`
 
 Checks if the service is running.
 
-```kotlin
-suspend fun isRunning(): Boolean
+```swift
+public func getIsRunning() -> Bool
 ```
 
 **Returns:** `true` if running, `false` otherwise
@@ -386,15 +343,15 @@ suspend fun isRunning(): Boolean
 
 Gets the core client instance. Service must be initialized before accessing the client.
 
-```kotlin
-suspend fun getCoreClient(): UplinkCoreClient?
+```swift
+public func getCoreClient() -> UplinkCoreClient?
 ```
 
-**Returns:** `UplinkCoreClient` instance or `null` if not initialized
+**Returns:** `UplinkCoreClient` instance or `nil` if not initialized
 
 **Example:**
-```kotlin
-val coreClient = service.getCoreClient()
+```swift
+let coreClient = service.getCoreClient()
 ```
 
 #### Token Management
@@ -403,12 +360,12 @@ val coreClient = service.getCoreClient()
 
 Updates the access token for the current client.
 
-```kotlin
-suspend fun setAccessToken(token: String?)
+```swift
+public func setAccessToken(_ token: String?)
 ```
 
 **Parameters:**
-- `token`: New access token (or `null` to clear)
+- `token`: New access token (or `nil` to clear)
 
 ## HTTP Client
 
@@ -420,29 +377,291 @@ The `HttpClient` class provides methods for making HTTP requests to the backend 
 
 Performs a GET request.
 
-```kotlin
-suspend inline fun <reified T> get(
+```swift
+public func get<T: Decodable>(
     endpoint: String,
-    queryParams: Map<String, String>? = null
-): T
+    parameters: [String: Any]? = nil
+) async throws -> T
 ```
 
 **Parameters:**
 - `endpoint`: API endpoint path (e.g., `"/mobile/subscriber/register"`)
-- `queryParams`: Optional query parameters
+- `parameters`: Optional query parameters
 
 **Returns:** Deserialized response object of type `T`
 
-**Throws:** `ApiException` if the request fails
+**Throws:** Error if the request fails
+
+**Example:**
+```swift
+let response: SubscriberResponse = try await httpClient.get(
+    endpoint: "/subscriber",
+    parameters: nil
+)
+```
 
 #### `post`
 
 Performs a POST request.
 
-```kotlin
-suspend inline fun <reified T, reified B> post(
+```swift
+public func post<T: Decodable, B: Encodable>(
     endpoint: String,
     body: B
+) async throws -> T
+```
+
+**Parameters:**
+- `endpoint`: API endpoint path
+- `body`: Request body object (will be serialized to JSON)
+
+**Returns:** Deserialized response object of type `T`
+
+**Throws:** Error if the request fails
+
+**Example:**
+```swift
+let request = AppAuthRequest(appId: "app-id", appSecret: "app-secret")
+let response: AppAuthResponse = try await httpClient.post(
+    endpoint: "/auth/app",
+    body: request
+)
+```
+
+#### `delete`
+
+Performs a DELETE request.
+
+```swift
+public func delete(endpoint: String) async throws
+```
+
+**Parameters:**
+- `endpoint`: API endpoint path
+
+**Throws:** Error if the request fails
+
+#### `getFromUrl`
+
+Performs a GET request to an external URL (not using baseURL).
+
+```swift
+public func getFromUrl<T: Decodable>(url: String) async throws -> T
+```
+
+**Parameters:**
+- `url`: Full URL to request
+
+**Returns:** Deserialized response object of type `T`
+
+**Throws:** Error if the request fails
+
+**Example:**
+```swift
+let response: IOSPasspointProfileResponse = try await httpClient.getFromUrl(
+    url: "https://radiustest2.uplink.xyz/passpoint/sdk/ios"
+)
+```
+
+### Authentication Headers
+
+The HTTP client automatically adds the `Authorization: Bearer {token}` header to all requests when an access token is set.
+
+### Error Handling
+
+HTTP errors are thrown as `Error` types. The SDK uses Alamofire for HTTP requests, which provides detailed error information.
+
+**Example Error Handling:**
+```swift
+do {
+    let response = try await httpClient.get(...)
+} catch {
+    if let afError = error as? AFError {
+        switch afError {
+        case .responseValidationFailed:
+            print("Response validation failed")
+        case .responseSerializationFailed:
+            print("Response serialization failed")
+        default:
+            print("HTTP error: \(afError.localizedDescription)")
+        }
+    } else {
+        print("Error: \(error.localizedDescription)")
+    }
+}
+```
+
+## License Controller
+
+The `LicenseController` class manages access to SDK modules and features based on license information.
+
+### Setting a License
+
+```swift
+public func setLicense(_ licenseInfo: LicenseInfo)
+```
+
+**Parameters:**
+- `licenseInfo`: License information containing allowed modules and features
+
+**Example:**
+```swift
+let expirationDate = Calendar.current.date(byAdding: .year, value: 1, to: Date())
+let licenseInfo = LicenseInfo(
+    licenseKey: "LICENSE-KEY-123",
+    features: ["profile-installation", "profile-management"],
+    modules: ["PasspointProfileSDK", "NetworkSDK"],
+    expirationDate: expirationDate,
+    isActive: true
+)
+
+licenseController.setLicense(licenseInfo)
+```
+
+### Checking Module Access
+
+```swift
+public func isModuleAllowed(_ moduleName: String) -> Bool
+```
+
+**Parameters:**
+- `moduleName`: Name of the module to check (e.g., `"PasspointProfileSDK"`)
+
+**Returns:** `true` if the module is allowed, `false` otherwise
+
+**Example:**
+```swift
+if licenseController.isModuleAllowed("PasspointProfileSDK") {
+    // Use Passpoint Profile SDK
+} else {
+    // Handle access denied
+}
+```
+
+### Checking Feature Access
+
+```swift
+public func isFeatureAllowed(_ featureName: String) -> Bool
+```
+
+**Parameters:**
+- `featureName`: Name of the feature to check (e.g., `"profile-installation"`)
+
+**Returns:** `true` if the feature is allowed, `false` otherwise
+
+**Example:**
+```swift
+if licenseController.isFeatureAllowed("profile-installation") {
+    // Use profile installation feature
+} else {
+    // Handle access denied
+}
+```
+
+### License Validation
+
+```swift
+public func isLicenseValid() -> Bool
+```
+
+**Returns:** `true` if license is active and not expired, `false` otherwise
+
+**Example:**
+```swift
+if licenseController.isLicenseValid() {
+    // License is valid
+} else {
+    // License is invalid or expired
+}
+```
+
+### Getting License Information
+
+```swift
+public func getLicense() -> LicenseInfo?
+public func getAllowedModules() -> Set<String>
+public func getAllowedFeatures() -> Set<String>
+```
+
+**Example:**
+```swift
+if let license = licenseController.getLicense() {
+    print("License Key: \(license.licenseKey)")
+    print("Allowed Modules: \(license.modules)")
+    print("Allowed Features: \(license.features)")
+}
+
+let allowedModules = licenseController.getAllowedModules()
+let allowedFeatures = licenseController.getAllowedFeatures()
+```
+
+### Clearing License
+
+```swift
+public func clearLicense()
+```
+
+Clears the current license information.
+
+## Data Models
+
+### DeviceInfo
+
+Device information structure for registration.
+
+```swift
+public struct DeviceInfo {
+    public let deviceId: String
+    public let deviceModel: String
+    public let osVersion: String
+    public let osType: String
+}
+```
+
+### LicenseInfo
+
+License information structure.
+
+```swift
+public struct LicenseInfo {
+    public let licenseKey: String
+    public let features: Set<String>
+    public let modules: Set<String>
+    public let expirationDate: Date? // nil for perpetual licenses
+    public let isActive: Bool
+}
+```
+
+## Error Handling
+
+The Core SDK uses Swift's standard error handling with `Error` protocol. HTTP errors are typically `AFError` from Alamofire.
+
+**Example Error Handling:**
+```swift
+do {
+    let coreClient = await UplinkCoreClient.create(...)
+} catch {
+    print("Error: \(error.localizedDescription)")
+    // Handle error appropriately
+}
+```
+
+## Best Practices
+
+1. **Initialize Early**: Initialize the Core SDK in your `AppDelegate.application(_:didFinishLaunchingWithOptions:)` method
+2. **Use Service Pattern**: Use `UplinkServiceManager.shared` for singleton access to the client
+3. **Handle Errors**: Always wrap SDK calls in do-catch blocks
+4. **Check Authentication**: Verify `getIsAuthenticated()` before making authenticated requests
+5. **Refresh Tokens**: The SDK automatically refreshes tokens, but you can manually call `refreshTokenIfNeeded()` if needed
+6. **License Validation**: Always check license validity before using SDK modules
+7. **Use async/await**: The SDK uses modern Swift concurrency, so use async/await for all SDK calls
+
+## Related Documentation
+
+- [Passpoint SDK API Reference](../ios/passpoint-sdk.md)
+- [API Endpoints](../api-endpoints.md)
+- [Getting Started Guide](../ios/getting-started.md)
+
 ): T
 ```
 
