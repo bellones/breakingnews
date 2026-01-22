@@ -1,170 +1,251 @@
-## Overview
+## Prerequisites
 
-The Uplink Passpoint SDK provides a comprehensive solution for managing Passpoint (Hotspot 2.0) Wi-Fi profiles on Android and iOS platforms. This SDK enables developers to programmatically install, manage, and maintain Passpoint profiles, with automatic lifecycle management including certificate monitoring, renewal scheduling, and profile updates.
+- Android Studio (latest stable version)
+- JDK 11 or higher
+- Android SDK (API level 24+)
+- Gradle 7.0+
+- Android device or emulator running Android 7.0 (API 24) or higher
 
-## Platform Support
+## SDK Integration
 
-- **Android**: API level 24 (Android 7.0 Nougat) or higher
-- **iOS**: iOS 13.0 or higher
+### Step 1: Add Dependencies
 
-## Key Features
+Add the SDK modules to your `build.gradle` (module level):
 
-- **Profile Management**: Install, list, validate, and remove Passpoint profiles
-- **Automatic Lifecycle Management**: Certificate monitoring, renewal scheduling, and profile updates
-- **Background Operations**: Polling for profile updates, background certificate checks
-- **Secure Storage**: Encrypted storage for profile data and credentials
-- **Error Handling**: Comprehensive error handling with retry logic and exponential backoff
-- **Permission Management**: Automatic permission/entitlement validation and handling
-- **Push Notification Support**: Integration with push notification services for profile updates
+```gradle
+dependencies {
+    implementation project(':uplink-core-sdk')
+    implementation project(':uplink-passpoint-profile-sdk')
+}
+```
 
-## Documentation Structure
+Or if using published artifacts:
 
-### Getting Started
+```gradle
+dependencies {
+    implementation 'com.uplink:core-sdk:1.0.0'
+    implementation 'com.uplink:passpoint-profile-sdk:1.0.0'
+}
+```
 
-- [Android Getting Started Guide](android/getting-started.md) - Quick start for Android integration
-- [iOS Getting Started Guide](ios/getting-started.md) - Quick start for iOS integration
+### Step 2: Configure Permissions
 
-### Core SDK Documentation
+Add required permissions to `AndroidManifest.xml`:
 
-- [Android Core SDK](android/core-sdk.md) - Core SDK API reference for Android
-- [iOS Core SDK](ios/core-sdk.md) - Core SDK API reference for iOS
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+```
 
-### Passpoint SDK Documentation
+### Step 3: Initialize SDK
 
-- [Android Passpoint SDK](android/passpoint-sdk.md) - Passpoint SDK API reference for Android
-- [iOS Passpoint SDK](ios/passpoint-sdk.md) - Passpoint SDK API reference for iOS
-
-### API Reference
-
-- [API Endpoints](api-endpoints.md) - Backend API endpoints documentation
-
-### Permissions and Entitlements
-
-- [Android Permissions](android/permissions.md) - Required permissions and runtime handling
-- [iOS Entitlements](ios/entitlements.md) - Required entitlements and configuration
-
-### Advanced Topics
-
-- [Lifecycle Management](lifecycle-management.md) - Profile polling, certificate monitoring, and renewal
-- [Error Handling](error-handling.md) - Error types, codes, and handling strategies
-- [Storage and Caching](storage-and-caching.md) - Encrypted storage and cache management
-
-### Code Examples
-
-- [Android Examples](android/examples.md) - Complete code examples for Android
-- [iOS Examples](ios/examples.md) - Complete code examples for iOS
-
-### Guides
-
-- [Troubleshooting](troubleshooting.md) - Common issues and solutions
-- [Best Practices](best-practices.md) - Recommended implementation patterns
-
-## Quick Start
-
-### Android
+Initialize the SDK in your `Application` class:
 
 ```kotlin
-// Initialize Core SDK
-val coreClient = UplinkCoreClient.fromService(
-    baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
-    appId = "your-app-id",
-    appSecret = "your-app-secret",
-    deviceInfo = DeviceInfo(...),
-    context = applicationContext
-)
-
-// Initialize Passpoint SDK
-val passpointClient = UplinkPasspointClient.create(
-    context = applicationContext,
-    coreClient = coreClient
-)
-
-// Install a profile
-val result = passpointClient.profileManager().installProfileFromResponse(profileResponse)
+class MyApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        
+        // Initialize Core SDK
+        val deviceInfo = DeviceInfo(
+            deviceId = getDeviceId(),
+            deviceModel = Build.MODEL,
+            osVersion = Build.VERSION.RELEASE,
+            osType = "Android"
+        )
+        
+        lifecycleScope.launch {
+            val coreClient = UplinkCoreClient.fromService(
+                baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
+                appId = "your-app-id",
+                appSecret = "your-app-secret",
+                deviceInfo = deviceInfo,
+                context = applicationContext
+            )
+            
+            // Initialize Passpoint SDK
+            val passpointClient = UplinkPasspointClient.create(
+                context = applicationContext,
+                coreClient = coreClient
+            )
+            
+            // Store clients for later use
+            // (e.g., in a dependency injection container)
+        }
+    }
+}
 ```
 
-### iOS
+## Basic Usage
 
-```swift
-// Initialize Core SDK
-let coreClient = await UplinkCoreClient.create(
-    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-    appId: "your-app-id",
-    appSecret: "your-app-secret",
-    deviceInfo: DeviceInfo(...)
-)
+### Install a Profile
 
-// Initialize Passpoint SDK
-let passpointClient = UplinkPasspointClient(
-    coreClient: coreClient
-)
-
-// Install a profile
-let result = try await passpointClient.getProfileManager().installProfileFromResponse(profileResponse)
-```
-
-## Architecture Overview
-
-The SDK is organized into two main components:
-
-1. **Core SDK**: Provides authentication, HTTP client, logging, task scheduling, and license management
-2. **Passpoint SDK**: Provides Passpoint profile management, lifecycle orchestration, and platform-specific implementations
-
-```mermaid
-graph TB
-    App[Your Application] --> CoreSDK[Uplink Core SDK]
-    App --> PasspointSDK[Uplink Passpoint SDK]
-    PasspointSDK --> CoreSDK
-    CoreSDK --> API[Backend API]
-    PasspointSDK --> Platform[Android/iOS Platform APIs]
+```kotlin
+lifecycleScope.launch {
+    // Check permissions first
+    val profileManager = passpointClient.profileManager()
+    if (!profileManager.hasAllPermissions()) {
+        profileManager.requestPermissions(activity) { result ->
+            if (result.allGranted) {
+                installProfile()
+            }
+        }
+        return@launch
+    }
     
-    subgraph CoreSDK
-        Auth[Authentication]
-        HTTP[HTTP Client]
-        Logger[Logging]
-        Scheduler[Task Scheduler]
-        License[License Controller]
-    end
+    // Fetch profile from API
+    val profileResponse = coreClient.getAndroidPasspointProfile()
     
-    subgraph PasspointSDK
-        Manager[Profile Manager]
-        Installer[Profile Installer]
-        Lister[Profile Lister]
-        Remover[Profile Remover]
-        Validator[Profile Validator]
-        Lifecycle[Lifecycle Orchestrator]
-    end
+    // Install profile
+    val result = profileManager.installProfileFromResponse(profileResponse)
+    result.onSuccess { installResult ->
+        if (installResult.success) {
+            Log.i("App", "Profile installed: ${installResult.profileId}")
+        } else {
+            Log.e("App", "Installation failed: ${installResult.errorMessage}")
+        }
+    }.onFailure { error ->
+        Log.e("App", "Installation error: ${error.message}")
+    }
+}
 ```
 
-## Authentication
+### List Profiles
 
-The SDK uses JWT-based authentication. Developers must provide `appId` and `appSecret` credentials to authenticate with the backend API. The SDK automatically:
+```kotlin
+lifecycleScope.launch {
+    val result = profileManager.listProfiles()
+    result.onSuccess { profiles ->
+        Log.i("App", "Found ${profiles.size} installed profiles")
+        profiles.forEach { profile ->
+            Log.d("App", "Profile: ${profile.friendlyName} (${profile.fqdn})")
+        }
+    }.onFailure { error ->
+        Log.e("App", "Failed to list profiles: ${error.message}")
+    }
+}
+```
 
-- Authenticates on initialization
-- Stores credentials securely
-- Refreshes tokens when expired
-- Manages subscriber creation
+### Remove a Profile
 
-## Lifecycle Management
+```kotlin
+lifecycleScope.launch {
+    val result = profileManager.removeProfile("profile-id")
+    result.onSuccess {
+        Log.i("App", "Profile removed successfully")
+    }.onFailure { error ->
+        Log.e("App", "Failed to remove profile: ${error.message}")
+    }
+}
+```
 
-The SDK provides automatic lifecycle management:
+### Validate a Profile
 
-- **Profile Polling**: Checks for profile updates at least once daily
-- **Certificate Monitoring**: Monitors certificate expiration dates
-- **Renewal Scheduling**: Automatically renews profiles 90 days before expiration
-- **Installation Retry**: Retries failed installations with exponential backoff
+```kotlin
+lifecycleScope.launch {
+    val result = profileManager.verifyProfile(profile)
+    result.onSuccess { validationResult ->
+        if (validationResult.isValid) {
+            Log.i("App", "Profile is valid")
+        } else {
+            Log.e("App", "Profile validation failed: ${validationResult.errorMessage}")
+        }
+    }
+}
+```
 
-## Security
+## Complete Integration Example
 
-- Credentials are stored in encrypted storage
-- Profile data is encrypted at rest
-- All API communications use HTTPS
-- JWT tokens are securely managed and refreshed
+```kotlin
+class MainActivity : AppCompatActivity() {
+    private lateinit var passpointClient: UplinkPasspointClient
+    private lateinit var coreClient: UplinkCoreClient
+    
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        
+        lifecycleScope.launch {
+            initializeSDK()
+        }
+    }
+    
+    private suspend fun initializeSDK() {
+        val deviceInfo = DeviceInfo(
+            deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID),
+            deviceModel = Build.MODEL,
+            osVersion = Build.VERSION.RELEASE,
+            osType = "Android"
+        )
+        
+        coreClient = UplinkCoreClient.fromService(
+            baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
+            appId = "your-app-id",
+            appSecret = "your-app-secret",
+            deviceInfo = deviceInfo,
+            context = applicationContext
+        ) ?: return
+        
+        passpointClient = UplinkPasspointClient.create(
+            context = applicationContext,
+            coreClient = coreClient,
+            errorCallback = object : PasspointErrorCallback {
+                override fun onInstallationError(error: Throwable, attempt: Int, willRetry: Boolean) {
+                    Log.e("App", "Installation error (attempt $attempt, willRetry: $willRetry): ${error.message}")
+                }
+            }
+        )
+    }
+    
+    private fun installProfile() {
+        lifecycleScope.launch {
+            val profileManager = passpointClient.profileManager()
+            
+            // Check permissions
+            if (!profileManager.hasAllPermissions()) {
+                profileManager.requestPermissions(this@MainActivity) { result ->
+                    if (result.allGranted) {
+                        installProfile()
+                    }
+                }
+                return@launch
+            }
+            
+            // Fetch and install profile
+            try {
+                val profileResponse = coreClient.getAndroidPasspointProfile()
+                val result = profileManager.installProfileFromResponse(profileResponse)
+                result.onSuccess { installResult ->
+                    if (installResult.success) {
+                        showMessage("Profile installed successfully")
+                    } else {
+                        showError("Installation failed: ${installResult.errorMessage}")
+                    }
+                }.onFailure { error ->
+                    showError("Error: ${error.message}")
+                }
+            } catch (e: Exception) {
+                showError("Failed to fetch profile: ${e.message}")
+            }
+        }
+    }
+    
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        passpointClient.profileManager().handlePermissionResult(requestCode, permissions, grantResults)
+    }
+}
+```
 
-## Support
+## Next Steps
 
-For issues, questions, or contributions, please refer to the troubleshooting guide or contact the SDK support team.
-
-## License
-
-UPLINK ALL RIGHTS RESERVED
+- Read the [Passpoint SDK API Reference](passpoint-sdk.md) for detailed API documentation
+- Check [Permissions Guide](permissions.md) for permission handling
+- See [Code Examples](examples.md) for more examples
+- Review [Best Practices](../best-practices.md) for recommended patterns
