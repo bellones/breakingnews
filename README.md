@@ -1,72 +1,170 @@
-# Changelog
+## Overview
 
-## Recent Fixes
+The Uplink Passpoint SDK provides a comprehensive solution for managing Passpoint (Hotspot 2.0) Wi-Fi profiles on Android and iOS platforms. This SDK enables developers to programmatically install, manage, and maintain Passpoint profiles, with automatic lifecycle management including certificate monitoring, renewal scheduling, and profile updates.
+
+## Platform Support
+
+- **Android**: API level 24 (Android 7.0 Nougat) or higher
+- **iOS**: iOS 13.0 or higher
+
+## Key Features
+
+- **Profile Management**: Install, list, validate, and remove Passpoint profiles
+- **Automatic Lifecycle Management**: Certificate monitoring, renewal scheduling, and profile updates
+- **Background Operations**: Polling for profile updates, background certificate checks
+- **Secure Storage**: Encrypted storage for profile data and credentials
+- **Error Handling**: Comprehensive error handling with retry logic and exponential backoff
+- **Permission Management**: Automatic permission/entitlement validation and handling
+- **Push Notification Support**: Integration with push notification services for profile updates
+
+## Documentation Structure
+
+### Getting Started
+
+- [Android Getting Started Guide](android/getting-started.md) - Quick start for Android integration
+- [iOS Getting Started Guide](ios/getting-started.md) - Quick start for iOS integration
+
+### Core SDK Documentation
+
+- [Android Core SDK](android/core-sdk.md) - Core SDK API reference for Android
+- [iOS Core SDK](ios/core-sdk.md) - Core SDK API reference for iOS
+
+### Passpoint SDK Documentation
+
+- [Android Passpoint SDK](android/passpoint-sdk.md) - Passpoint SDK API reference for Android
+- [iOS Passpoint SDK](ios/passpoint-sdk.md) - Passpoint SDK API reference for iOS
+
+### API Reference
+
+- [API Endpoints](api-endpoints.md) - Backend API endpoints documentation
+
+### Permissions and Entitlements
+
+- [Android Permissions](android/permissions.md) - Required permissions and runtime handling
+- [iOS Entitlements](ios/entitlements.md) - Required entitlements and configuration
+
+### Advanced Topics
+
+- [Lifecycle Management](lifecycle-management.md) - Profile polling, certificate monitoring, and renewal
+- [Error Handling](error-handling.md) - Error types, codes, and handling strategies
+- [Storage and Caching](storage-and-caching.md) - Encrypted storage and cache management
+
+### Code Examples
+
+- [Android Examples](android/examples.md) - Complete code examples for Android
+- [iOS Examples](ios/examples.md) - Complete code examples for iOS
+
+### Guides
+
+- [Troubleshooting](troubleshooting.md) - Common issues and solutions
+- [Best Practices](best-practices.md) - Recommended implementation patterns
+
+## Quick Start
 
 ### Android
 
-#### Playground App
-- **Google Play Store Publishing**: Added support for publishing the Android Playground app to Google Play Store for internal testing
-  - Configured keystore generation and signing
-  - Added AAB (Android App Bundle) build configuration
-  - Set up release build configuration for Play Store distribution
+```kotlin
+// Initialize Core SDK
+val coreClient = UplinkCoreClient.fromService(
+    baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
+    appId = "your-app-id",
+    appSecret = "your-app-secret",
+    deviceInfo = DeviceInfo(...),
+    context = applicationContext
+)
 
----
+// Initialize Passpoint SDK
+val passpointClient = UplinkPasspointClient.create(
+    context = applicationContext,
+    coreClient = coreClient
+)
+
+// Install a profile
+val result = passpointClient.profileManager().installProfileFromResponse(profileResponse)
+```
 
 ### iOS
 
-#### SDK Fixes
+```swift
+// Initialize Core SDK
+let coreClient = await UplinkCoreClient.create(
+    baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+    appId: "your-app-id",
+    appSecret: "your-app-secret",
+    deviceInfo: DeviceInfo(...)
+)
 
-- **Background Task Registration**: Fixed duplicate background task registration crash
-  - Added Objective-C helper (`BGTaskRegistrationHelper`) to safely handle `NSException` during task registration
-  - Implemented thread-safe registration guard to prevent duplicate registrations
-  - Added proper bridging header configuration
+// Initialize Passpoint SDK
+let passpointClient = UplinkPasspointClient(
+    coreClient: coreClient
+)
 
-- **Endpoint Configuration**: Fixed incorrect endpoint usage for iOS Passpoint profile downloads
-  - Corrected `fetchIOSPasspointProfile()` to use the correct iOS-specific endpoint
-  - Added validation and logging to ensure platform-specific endpoints are used
+// Install a profile
+let result = try await passpointClient.getProfileManager().installProfileFromResponse(profileResponse)
+```
 
-- **Entitlements Validation**: Improved entitlements checking logic
-  - Enhanced logging for entitlement validation
-  - Improved error handling when entitlements are missing
+## Architecture Overview
 
-- **Profile Installation**: Enhanced profile installation logic
-  - Added duplicate profile detection (by FQDN or ID) before installation
-  - Improved `NEHotspotHS20Settings` configuration to always set required fields (even if empty)
-  - Added detailed logging for profile installation process
+The SDK is organized into two main components:
 
-- **Profile Removal**: Fixed profile removal functionality
-  - Corrected cache removal logic to properly find and remove profiles by ID or FQDN
-  - Ensured `UserDefaults.synchronize()` is called after cache updates
-  - Improved error handling and user feedback
+1. **Core SDK**: Provides authentication, HTTP client, logging, task scheduling, and license management
+2. **Passpoint SDK**: Provides Passpoint profile management, lifecycle orchestration, and platform-specific implementations
 
-#### Playground App Fixes
+```mermaid
+graph TB
+    App[Your Application] --> CoreSDK[Uplink Core SDK]
+    App --> PasspointSDK[Uplink Passpoint SDK]
+    PasspointSDK --> CoreSDK
+    CoreSDK --> API[Backend API]
+    PasspointSDK --> Platform[Android/iOS Platform APIs]
+    
+    subgraph CoreSDK
+        Auth[Authentication]
+        HTTP[HTTP Client]
+        Logger[Logging]
+        Scheduler[Task Scheduler]
+        License[License Controller]
+    end
+    
+    subgraph PasspointSDK
+        Manager[Profile Manager]
+        Installer[Profile Installer]
+        Lister[Profile Lister]
+        Remover[Profile Remover]
+        Validator[Profile Validator]
+        Lifecycle[Lifecycle Orchestrator]
+    end
+```
 
-- **Info.plist Configuration**: Added missing background task identifier
-  - Added `BGTaskSchedulerPermittedIdentifiers` with `com.uplink.passpoint.profilePolling` identifier
+## Authentication
 
-- **Double-Tap Crash**: Fixed crash when double-clicking Passpoint profile
-  - Added debounce mechanism and `isProcessing` flag to prevent multiple simultaneous operations
-  - Implemented tap handling protection in both button taps and table view row selections
+The SDK uses JWT-based authentication. Developers must provide `appId` and `appSecret` credentials to authenticate with the backend API. The SDK automatically:
 
-- **UI Flow Improvements**: Enhanced profile download and installation flow
-  - Added "Download Again" button option when a profile is already loaded
-  - Implemented `resetProfileState()` to allow re-downloading profiles without navigating away
-  - Improved button state management between download and install actions
+- Authenticates on initialization
+- Stores credentials securely
+- Refreshes tokens when expired
+- Manages subscriber creation
 
-- **Multiple Profile Handling**: Improved handling of multiple installed profiles
-  - Added duplicate profile detection and prevention
-  - Enhanced cache management to remove existing profiles before adding new ones
-  - Improved UI feedback when attempting to install duplicate profiles
+## Lifecycle Management
 
-- **CocoaPods Integration**: Fixed framework linking issues
-  - Resolved `Pods_Playground.framework` not found errors
-  - Performed clean `pod deintegrate` and `pod install` to fix dependency issues
-  - Updated framework search paths and build configurations
+The SDK provides automatic lifecycle management:
 
----
+- **Profile Polling**: Checks for profile updates at least once daily
+- **Certificate Monitoring**: Monitors certificate expiration dates
+- **Renewal Scheduling**: Automatically renews profiles 90 days before expiration
+- **Installation Retry**: Retries failed installations with exponential backoff
 
-## Notes
+## Security
 
-- All fixes have been tested and verified
-- iOS fixes require rebuilding the SDK frameworks and Playground app
-- Android Play Store publishing requires proper keystore configuration
+- Credentials are stored in encrypted storage
+- Profile data is encrypted at rest
+- All API communications use HTTPS
+- JWT tokens are securely managed and refreshed
+
+## Support
+
+For issues, questions, or contributions, please refer to the troubleshooting guide or contact the SDK support team.
+
+## License
+
+UPLINK ALL RIGHTS RESERVED
