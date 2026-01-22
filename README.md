@@ -1,255 +1,245 @@
 ## Overview
 
-This guide covers error types, error codes, and best practices for handling errors in the Passpoint SDK.
+The Passpoint SDK provides automatic lifecycle management for Passpoint profiles, including profile polling, certificate monitoring, renewal scheduling, and installation retry logic.
 
-## Error Categories
+## Profile Polling
 
-### Authentication Errors
+Profile polling checks for profile updates from the backend API at least once daily.
 
-Occur when authentication with the backend API fails.
+### Polling Mechanism
 
-**Android:**
-- `ApiException.Unauthorized`: Invalid credentials or expired token
+- **Interval**: Polls at least once every 24 hours
+- **Trigger**: Automatic on app launch or background refresh
+- **Manual Trigger**: Can be manually triggered via `checkForProfileUpdates()`
 
-**iOS:**
-- `NSError` with domain "UplinkCoreClient" and code -1
+### Android Implementation
 
-**Handling:**
+Uses WorkManager for background polling:
+
+```kotlin
+// Polling is automatically started when PasspointClient is created
+val passpointClient = UplinkPasspointClient.create(...)
+
+// Manually trigger polling
+passpointClient.checkForProfileUpdates()
+
+// Check if polling should be triggered
+if (passpointClient.shouldPollForUpdates()) {
+    passpointClient.checkForProfileUpdates()
+}
+```
+
+### iOS Implementation
+
+Uses BGTaskScheduler for background polling:
+
+```swift
+// Register background task in AppDelegate
+PasspointProfilePoller.registerBackgroundTask()
+
+// Polling is automatically started when PasspointClient is created
+let passpointClient = UplinkPasspointClient(...)
+
+// Manually trigger polling
+try await passpointClient.checkForProfileUpdates()
+
+// Check if polling should be triggered
+if passpointClient.shouldPollForUpdates() {
+    try await passpointClient.checkForProfileUpdates()
+}
+```
+
+### Polling Flow
+
+```mermaid
+flowchart TD
+    Start[App Launch/Background Task] --> Check{Last Poll > 24h?}
+    Check -->|No| Skip[Skip Polling]
+    Check -->|Yes| Fetch[Fetch Profile from API]
+    Fetch --> CheckInstalled{Profile Installed?}
+    CheckInstalled -->|No| Install[Install Profile]
+    CheckInstalled -->|Yes| CheckUpdate{Profile Updated?}
+    CheckUpdate -->|Yes| Update[Update Profile]
+    CheckUpdate -->|No| Done[Complete]
+    Install --> Done
+    Update --> Done
+```
+
+## Certificate Monitoring
+
+Certificate monitoring tracks certificate expiration dates and triggers renewal when needed.
+
+### Monitoring Mechanism
+
+- **Frequency**: Checks certificates periodically (default: every 24 hours)
+- **Renewal Trigger**: 90 days before certificate expiration
+- **Status Tracking**: Tracks profile status (ACTIVE, EXPIRED, PENDING_RENEWAL)
+
+### Manual Monitoring
+
 ```kotlin
 // Android
-try {
-    val coreClient = UplinkCoreClient.create(...)
-} catch (e: ApiException.Unauthorized) {
-    // Re-authenticate or show error to user
-}
+passpointClient.checkCertificateMonitoring()
 ```
 
 ```swift
 // iOS
-do {
-    let coreClient = await UplinkCoreClient.create(...)
-} catch {
-    // Handle authentication error
-}
+try await passpointClient.checkCertificateMonitoring()
 ```
 
-### Network Errors
+### Certificate Status
 
-Occur when network communication fails.
+- **ACTIVE**: Certificate is valid and not expired
+- **EXPIRED**: Certificate has expired
+- **PENDING_RENEWAL**: Certificate is within renewal window (90 days before expiration)
 
-**Android:**
-- `ApiException.NetworkError`: Network connectivity issues
-- `ApiException.ServerError`: Server errors (5xx)
+## Renewal Scheduling
 
-**iOS:**
-- `AFError` from Alamofire for network errors
+Renewal scheduling automatically renews profiles 90 days before certificate expiration.
 
-**Handling:**
+### Renewal Process
+
+1. Certificate monitor detects profile needs renewal
+2. Renewal scheduler fetches new profile from API
+3. New profile is installed
+4. Old profile is removed (if possible)
+5. Cache is updated
+
+### Manual Renewal
+
 ```kotlin
 // Android
-try {
-    val profile = coreClient.getAndroidPasspointProfile()
-} catch (e: ApiException.NetworkError) {
-    // Retry or show network error
-} catch (e: ApiException.ServerError) {
-    // Server error, may be transient
-}
-```
-
-### Permission Errors
-
-Occur when required permissions/entitlements are missing.
-
-**Android:**
-- `SecurityException`: Permission denied
-
-**iOS:**
-- `PasspointPermissionError.missingEntitlements`: Missing entitlements
-
-**Handling:**
-```kotlin
-// Android
-try {
-    profileManager.installProfile(profile)
-} catch (e: SecurityException) {
-    // Request permissions
-    profileManager.requestPermissions(activity) { ... }
-}
+passpointClient.checkRenewal()
 ```
 
 ```swift
 // iOS
-do {
-    try await profileManager.installProfile(profile)
-} catch let error as PasspointPermissionError {
-    // Handle missing entitlements
-    showEntitlementError(error)
-}
+try await passpointClient.checkRenewal()
 ```
 
-### Installation Errors
+### Renewal Flow
 
-Occur during profile installation.
-
-**Common Causes:**
-- Invalid profile configuration
-- Missing required fields
-- Platform-specific limitations
-
-**Handling:**
-```kotlin
-// Android
-val result = profileManager.installProfile(profile)
-result.onFailure { error ->
-    when (error) {
-        is IllegalArgumentException -> {
-            // Invalid profile configuration
-        }
-        is SecurityException -> {
-            // Permission denied
-        }
-        else -> {
-            // Other errors
-        }
-    }
-}
+```mermaid
+flowchart TD
+    Monitor[Certificate Monitor] --> Check{Expiration < 90 days?}
+    Check -->|No| Wait[Wait]
+    Check -->|Yes| Fetch[Fetch New Profile]
+    Fetch --> Install[Install New Profile]
+    Install --> Remove[Remove Old Profile]
+    Remove --> Update[Update Cache]
+    Update --> Complete[Renewal Complete]
 ```
 
-### Validation Errors
+## Installation Retry Logic
 
-Occur during profile validation.
-
-**Handling:**
-```kotlin
-// Android
-val result = profileManager.verifyProfile(profile)
-result.onSuccess { validationResult ->
-    if (!validationResult.isValid) {
-        // Handle validation failure
-        Log.e("App", validationResult.errorMessage ?: "Validation failed")
-    }
-}
-```
-
-## Error Codes Reference
-
-### Android API Exception Codes
-
-- `401`: Unauthorized
-- `400`: Bad Request
-- `404`: Not Found
-- `500/502/503`: Server Error
-
-### iOS Error Domains
-
-- `UplinkCoreClient`: Core SDK errors
-- `PasspointProfileInstaller`: Installation errors
-- `PasspointProfileRemover`: Removal errors
-- `PasspointPermissionError`: Permission/entitlement errors
-- `AFError`: Network errors (Alamofire)
-
-## Error Callback Implementation
-
-### Android
-
-```kotlin
-val errorCallback = object : PasspointErrorCallback {
-    override fun onInstallationError(error: Throwable, attempt: Int, willRetry: Boolean) {
-        when {
-            error is SecurityException -> {
-                // Permission error - not retryable
-                showPermissionError()
-            }
-            error is IllegalArgumentException -> {
-                // Configuration error - not retryable
-                showConfigurationError(error.message)
-            }
-            willRetry -> {
-                // Will retry automatically
-                Log.d("App", "Installation will retry (attempt $attempt)")
-            }
-            else -> {
-                // Final failure
-                showInstallationError(error.message)
-            }
-        }
-    }
-}
-```
-
-### iOS
-
-```swift
-class MyErrorCallback: PasspointErrorCallback {
-    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
-        if let permissionError = error as? PasspointPermissionError {
-            // Permission error - not retryable
-            showPermissionError(permissionError)
-        } else if willRetry {
-            // Will retry automatically
-            print("Installation will retry (attempt \(attempt))")
-        } else {
-            // Final failure
-            showInstallationError(error.localizedDescription)
-        }
-    }
-}
-```
-
-## Retry Strategies
-
-The SDK implements automatic retry with exponential backoff for retryable errors.
+The SDK automatically retries failed installations with exponential backoff.
 
 ### Retryable Errors
 
 - Network errors
 - Transient system errors
 - Timeouts
-- Server errors (5xx)
+- API status errors (5xx)
 
 ### Non-Retryable Errors
 
 - Permission errors
-- Configuration errors
+- Configuration errors (invalid profile)
 - Unsupported operations
+- Missing required fields
 
-### Manual Retry
+### Retry Strategy
+
+- **Initial Delay**: 1 second
+- **Max Delay**: 60 seconds
+- **Backoff**: Exponential (2x)
+- **Max Attempts**: 5 attempts
+
+### Error Callback
+
+Implement `PasspointErrorCallback` to receive retry notifications:
 
 ```kotlin
 // Android
-var attempts = 0
-val maxAttempts = 3
-
-suspend fun installWithRetry(profile: PasspointProfile) {
-    while (attempts < maxAttempts) {
-        val result = profileManager.installProfile(profile)
-        result.onSuccess {
-            return // Success
-        }.onFailure { error ->
-            attempts++
-            if (attempts >= maxAttempts) {
-                // Final failure
-                handleError(error)
-            } else {
-                // Wait before retry
-                delay(1000L * attempts) // Exponential backoff
-            }
-        }
+val errorCallback = object : PasspointErrorCallback {
+    override fun onInstallationError(error: Throwable, attempt: Int, willRetry: Boolean) {
+        Log.e("App", "Installation error (attempt $attempt, willRetry: $willRetry): ${error.message}")
     }
 }
 ```
 
+```swift
+// iOS
+class MyErrorCallback: PasspointErrorCallback {
+    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
+        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
+    }
+}
+```
+
+## Push Notification Integration
+
+The SDK supports push notification integration for immediate profile updates.
+
+### Notification Handler
+
+```kotlin
+// Android
+val notificationHandler = passpointClient.getNotificationHandler()
+// Handle push notification payload
+notificationHandler?.handleProfileUpdateNotification(payload)
+```
+
+```swift
+// iOS
+let notificationHandler = passpointClient.getNotificationHandler()
+// Handle push notification payload
+notificationHandler.handleProfileUpdateNotification(payload: payload)
+```
+
+### Notification Payload
+
+```json
+{
+  "type": "profile_update",
+  "profileId": "profile-123",
+  "action": "install" | "update" | "remove"
+}
+```
+
+## Lifecycle Orchestrator
+
+The `PasspointLifecycleOrchestrator` coordinates all lifecycle services:
+
+- Profile Polling
+- Certificate Monitoring
+- Renewal Scheduling
+- Installation Retry
+
+The orchestrator is automatically started when `UplinkPasspointClient` is created.
+
+### Stopping Lifecycle Services
+
+```kotlin
+// Android
+passpointClient.stop()
+```
+
+```swift
+// iOS
+passpointClient.stop()
+```
+
 ## Best Practices
 
-1. **Always Handle Errors**: Wrap SDK calls in try-catch or Result handling
-2. **Check Error Types**: Handle different error types appropriately
-3. **Provide User Feedback**: Show user-friendly error messages
-4. **Log Errors**: Log errors for debugging
-5. **Implement Retry Logic**: For transient errors, implement retry logic
-6. **Use Error Callbacks**: Implement error callbacks for installation errors
+1. **Let SDK Manage Lifecycle**: Don't manually manage polling/renewal unless necessary
+2. **Handle Errors**: Implement error callbacks for retry notifications
+3. **Monitor Status**: Check profile status periodically
+4. **Push Notifications**: Use push notifications for immediate updates when available
+5. **Background Tasks**: Ensure background tasks are properly configured (iOS)
 
 ## Related Documentation
 
-- [Lifecycle Management](lifecycle-management.md)
-- [Troubleshooting](troubleshooting.md)
+- [Error Handling](error-handling.md)
+- [Storage and Caching](storage-and-caching.md)
 - [Best Practices](best-practices.md)
