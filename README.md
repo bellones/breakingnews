@@ -1,245 +1,136 @@
 ## Overview
 
-The Passpoint SDK provides automatic lifecycle management for Passpoint profiles, including profile polling, certificate monitoring, renewal scheduling, and installation retry logic.
+The Passpoint SDK uses encrypted storage for profile data and maintains a local cache for profile tracking and metadata.
 
-## Profile Polling
+## Encrypted Storage
 
-Profile polling checks for profile updates from the backend API at least once daily.
+### Android
 
-### Polling Mechanism
+Uses `EncryptedSharedPreferences` for secure storage:
 
-- **Interval**: Polls at least once every 24 hours
-- **Trigger**: Automatic on app launch or background refresh
-- **Manual Trigger**: Can be manually triggered via `checkForProfileUpdates()`
+- Profile data encryption
+- Credential storage
+- Profile metadata
+- Installation timestamps
+- Expiration dates
+- Profile status
 
-### Android Implementation
+### iOS
 
-Uses WorkManager for background polling:
+Uses Keychain for secure storage:
+
+- Profile data encryption
+- Credential storage
+- Profile metadata
+- Installation timestamps
+- Expiration dates
+- Profile status
+
+## Profile Cache
+
+### Cache Structure
+
+The cache maintains:
+- Profile IDs and FQDNs
+- Installation dates
+- Expiration dates
+- Profile status
+- Last poll time
+
+### Cache Operations
+
+#### Android
 
 ```kotlin
-// Polling is automatically started when PasspointClient is created
-val passpointClient = UplinkPasspointClient.create(...)
-
-// Manually trigger polling
-passpointClient.checkForProfileUpdates()
-
-// Check if polling should be triggered
-if (passpointClient.shouldPollForUpdates()) {
-    passpointClient.checkForProfileUpdates()
-}
+// Cache is managed internally by the SDK
+// Access via ProfileInfoService
+val profileInfo = profileManager.getProfileInfo("profile-id")
+val allInfo = profileManager.getAllProfileInfo()
 ```
 
-### iOS Implementation
-
-Uses BGTaskScheduler for background polling:
+#### iOS
 
 ```swift
-// Register background task in AppDelegate
-PasspointProfilePoller.registerBackgroundTask()
-
-// Polling is automatically started when PasspointClient is created
-let passpointClient = UplinkPasspointClient(...)
-
-// Manually trigger polling
-try await passpointClient.checkForProfileUpdates()
-
-// Check if polling should be triggered
-if passpointClient.shouldPollForUpdates() {
-    try await passpointClient.checkForProfileUpdates()
-}
+// Cache is managed internally by the SDK
+// Access via ProfileInfoService
+let profileInfo = try await profileManager.getProfileInfo(profileId: "profile-id")
+let allInfo = try await profileManager.getAllProfileInfo()
 ```
 
-### Polling Flow
+## Profile Information Service
 
-```mermaid
-flowchart TD
-    Start[App Launch/Background Task] --> Check{Last Poll > 24h?}
-    Check -->|No| Skip[Skip Polling]
-    Check -->|Yes| Fetch[Fetch Profile from API]
-    Fetch --> CheckInstalled{Profile Installed?}
-    CheckInstalled -->|No| Install[Install Profile]
-    CheckInstalled -->|Yes| CheckUpdate{Profile Updated?}
-    CheckUpdate -->|Yes| Update[Update Profile]
-    CheckUpdate -->|No| Done[Complete]
-    Install --> Done
-    Update --> Done
-```
+Provides access to profile metadata:
 
-## Certificate Monitoring
-
-Certificate monitoring tracks certificate expiration dates and triggers renewal when needed.
-
-### Monitoring Mechanism
-
-- **Frequency**: Checks certificates periodically (default: every 24 hours)
-- **Renewal Trigger**: 90 days before certificate expiration
-- **Status Tracking**: Tracks profile status (ACTIVE, EXPIRED, PENDING_RENEWAL)
-
-### Manual Monitoring
+### Get Profile Info
 
 ```kotlin
 // Android
-passpointClient.checkCertificateMonitoring()
+val profileInfo = profileManager.getProfileInfo("profile-id")
+profileInfo?.let {
+    Log.i("App", "Installed: ${it.installationDate}")
+    Log.i("App", "Expires: ${it.expirationDate}")
+    Log.i("App", "Status: ${it.status}")
+}
 ```
 
 ```swift
 // iOS
-try await passpointClient.checkCertificateMonitoring()
+if let profileInfo = try await profileManager.getProfileInfo(profileId: "profile-id") {
+    print("Installed: \(profileInfo.installationDate)")
+    print("Expires: \(profileInfo.expirationDate?.description ?? "Never")")
+    print("Status: \(profileInfo.status)")
+}
 ```
 
-### Certificate Status
+### Get All Profile Info
 
-- **ACTIVE**: Certificate is valid and not expired
+```kotlin
+// Android
+val allInfo = profileManager.getAllProfileInfo()
+allInfo.forEach { info ->
+    Log.d("App", "Profile ${info.profileId}: ${info.status}")
+}
+```
+
+```swift
+// iOS
+let allInfo = try await profileManager.getAllProfileInfo()
+for info in allInfo {
+    print("Profile \(info.profileId): \(info.status)")
+}
+```
+
+## Profile Status Tracking
+
+The SDK tracks profile status:
+
+- **ACTIVE**: Profile is installed and valid
 - **EXPIRED**: Certificate has expired
 - **PENDING_RENEWAL**: Certificate is within renewal window (90 days before expiration)
 
-## Renewal Scheduling
+## Cache Synchronization
 
-Renewal scheduling automatically renews profiles 90 days before certificate expiration.
+The cache is automatically synchronized when:
+- Profile is installed
+- Profile is removed
+- Profile is updated
+- Certificate monitoring detects changes
 
-### Renewal Process
+## Security Considerations
 
-1. Certificate monitor detects profile needs renewal
-2. Renewal scheduler fetches new profile from API
-3. New profile is installed
-4. Old profile is removed (if possible)
-5. Cache is updated
-
-### Manual Renewal
-
-```kotlin
-// Android
-passpointClient.checkRenewal()
-```
-
-```swift
-// iOS
-try await passpointClient.checkRenewal()
-```
-
-### Renewal Flow
-
-```mermaid
-flowchart TD
-    Monitor[Certificate Monitor] --> Check{Expiration < 90 days?}
-    Check -->|No| Wait[Wait]
-    Check -->|Yes| Fetch[Fetch New Profile]
-    Fetch --> Install[Install New Profile]
-    Install --> Remove[Remove Old Profile]
-    Remove --> Update[Update Cache]
-    Update --> Complete[Renewal Complete]
-```
-
-## Installation Retry Logic
-
-The SDK automatically retries failed installations with exponential backoff.
-
-### Retryable Errors
-
-- Network errors
-- Transient system errors
-- Timeouts
-- API status errors (5xx)
-
-### Non-Retryable Errors
-
-- Permission errors
-- Configuration errors (invalid profile)
-- Unsupported operations
-- Missing required fields
-
-### Retry Strategy
-
-- **Initial Delay**: 1 second
-- **Max Delay**: 60 seconds
-- **Backoff**: Exponential (2x)
-- **Max Attempts**: 5 attempts
-
-### Error Callback
-
-Implement `PasspointErrorCallback` to receive retry notifications:
-
-```kotlin
-// Android
-val errorCallback = object : PasspointErrorCallback {
-    override fun onInstallationError(error: Throwable, attempt: Int, willRetry: Boolean) {
-        Log.e("App", "Installation error (attempt $attempt, willRetry: $willRetry): ${error.message}")
-    }
-}
-```
-
-```swift
-// iOS
-class MyErrorCallback: PasspointErrorCallback {
-    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
-        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
-    }
-}
-```
-
-## Push Notification Integration
-
-The SDK supports push notification integration for immediate profile updates.
-
-### Notification Handler
-
-```kotlin
-// Android
-val notificationHandler = passpointClient.getNotificationHandler()
-// Handle push notification payload
-notificationHandler?.handleProfileUpdateNotification(payload)
-```
-
-```swift
-// iOS
-let notificationHandler = passpointClient.getNotificationHandler()
-// Handle push notification payload
-notificationHandler.handleProfileUpdateNotification(payload: payload)
-```
-
-### Notification Payload
-
-```json
-{
-  "type": "profile_update",
-  "profileId": "profile-123",
-  "action": "install" | "update" | "remove"
-}
-```
-
-## Lifecycle Orchestrator
-
-The `PasspointLifecycleOrchestrator` coordinates all lifecycle services:
-
-- Profile Polling
-- Certificate Monitoring
-- Renewal Scheduling
-- Installation Retry
-
-The orchestrator is automatically started when `UplinkPasspointClient` is created.
-
-### Stopping Lifecycle Services
-
-```kotlin
-// Android
-passpointClient.stop()
-```
-
-```swift
-// iOS
-passpointClient.stop()
-```
+1. **Encryption**: All sensitive data is encrypted at rest
+2. **Keychain/EncryptedSharedPreferences**: Uses platform secure storage
+3. **No Plain Text**: Credentials are never stored in plain text
+4. **Automatic Cleanup**: Cache is cleaned when profiles are removed
 
 ## Best Practices
 
-1. **Let SDK Manage Lifecycle**: Don't manually manage polling/renewal unless necessary
-2. **Handle Errors**: Implement error callbacks for retry notifications
-3. **Monitor Status**: Check profile status periodically
-4. **Push Notifications**: Use push notifications for immediate updates when available
-5. **Background Tasks**: Ensure background tasks are properly configured (iOS)
+1. **Trust the Cache**: The SDK manages cache automatically
+2. **Check Status**: Use profile info to check status before operations
+3. **Monitor Expiration**: Use expiration dates for renewal planning
+4. **Don't Modify Cache**: Don't directly modify cache data
 
 ## Related Documentation
 
+- [Lifecycle Management](lifecycle-management.md)
 - [Error Handling](error-handling.md)
-- [Storage and Caching](storage-and-caching.md)
-- [Best Practices](best-practices.md)
