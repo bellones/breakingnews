@@ -1,42 +1,71 @@
-## Prerequisites
+## Overview
 
-- Xcode 14.0 or higher
-- iOS 13.0 or higher
-- CocoaPods (`sudo gem install cocoapods`) or Swift Package Manager
-- Apple Developer account with entitlements configured
+The iOS Passpoint SDK requires specific entitlements to function correctly. Entitlements are configured in the Apple Developer Portal and in your Xcode project. This guide covers all required entitlements and configuration steps.
 
-## SDK Integration
+## Required Entitlements
 
-### Step 1: Add Dependencies
+The SDK requires the following entitlements:
 
-#### Using CocoaPods
+- `com.apple.developer.networking.HotspotConfiguration`: Required for installing and managing Passpoint profiles
+- `com.apple.developer.networking.wifi-info`: Required for Wi-Fi information access
 
-Add to your `Podfile`:
+## Apple Developer Portal Setup
 
-```ruby
-pod 'UplinkCoreSDK', :path => '../UplinkSDKiOS'
-pod 'UplinkPasspointProfileSDK', :path => '../UplinkSDKiOS'
+### Step 1: Enable Capabilities
+
+1. Log in to [Apple Developer Portal](https://developer.apple.com/account)
+2. Navigate to **Certificates, Identifiers & Profiles**
+3. Select **Identifiers** > **App IDs**
+4. Select your App ID or create a new one
+5. Enable the following capabilities:
+   - **Hotspot Configuration**
+   - **Wi-Fi Information**
+6. Save the changes
+
+### Step 2: Update Provisioning Profiles
+
+After enabling capabilities, update your provisioning profiles:
+1. Navigate to **Profiles**
+2. Select your provisioning profile
+3. Click **Edit**
+4. Ensure the updated App ID is selected
+5. Download and install the updated provisioning profile
+
+## Xcode Configuration
+
+### Step 1: Add Entitlements File
+
+1. In Xcode, select your project
+2. Go to **Signing & Capabilities** tab
+3. Click **+ Capability**
+4. Add **Hotspot Configuration**
+5. Add **Wi-Fi Information**
+
+Alternatively, manually add to your entitlements file:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.developer.networking.HotspotConfiguration</key>
+    <true/>
+    <key>com.apple.developer.networking.wifi-info</key>
+    <true/>
+</dict>
+</plist>
 ```
 
-Then run:
+### Step 2: Configure Signing
 
-```bash
-pod install
-```
+1. In **Signing & Capabilities** tab
+2. Select your **Team**
+3. Ensure **Automatically manage signing** is enabled, or manually select the provisioning profile
+4. Verify that both entitlements appear in the capabilities list
 
-#### Using Swift Package Manager
+## Background Task Registration
 
-Add the SDK packages to your project dependencies.
-
-### Step 2: Configure Entitlements
-
-1. Enable capabilities in Apple Developer Portal (see [Entitlements Guide](entitlements.md))
-2. Add entitlements file to your project
-3. Configure in Xcode Signing & Capabilities
-
-### Step 3: Configure Background Tasks
-
-Add to `Info.plist`:
+For profile polling, register the background task identifier in `Info.plist`:
 
 ```xml
 <key>BGTaskSchedulerPermittedIdentifiers</key>
@@ -45,236 +74,129 @@ Add to `Info.plist`:
 </array>
 ```
 
-### Step 4: Initialize SDK
+### AppDelegate Registration
 
-Initialize the SDK in your `AppDelegate`:
+Register the background task in your `AppDelegate`:
 
 ```swift
 import UIKit
-import UplinkCoreSDK
-import UplinkPasspointProfileSDK
+import BackgroundTasks
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    
-    var coreClient: UplinkCoreClient?
-    var passpointClient: UplinkPasspointClient?
     
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        // Register background task
+        // Register background task for Passpoint polling
         PasspointProfilePoller.registerBackgroundTask()
-        
-        // Initialize SDK
-        Task {
-            await initializeSDK()
-        }
         
         return true
     }
     
-    private func initializeSDK() async {
-        let deviceInfo = DeviceInfo(
-            deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown",
-            deviceModel: UIDevice.current.model,
-            osVersion: UIDevice.current.systemVersion,
-            osType: "iOS"
-        )
-        
-        coreClient = await UplinkCoreClient.create(
-            baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-            appId: "your-app-id",
-            appSecret: "your-app-secret",
-            deviceInfo: deviceInfo
-        )
-        
-        passpointClient = UplinkPasspointClient(
-            coreClient: coreClient,
-            errorCallback: MyErrorCallback()
-        )
-    }
-}
-
-class MyErrorCallback: PasspointErrorCallback {
-    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
-        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
-    }
-}
-```
-
-## Basic Usage
-
-### Install a Profile
-
-```swift
-Task {
-    // Check entitlements first
-    let profileManager = passpointClient.getProfileManager()
-    let permissionStatus = profileManager.checkPermissions()
-    guard permissionStatus.allPresent else {
-        print("Missing entitlements: \(permissionStatus.missingPermissions.joined(separator: ", "))")
-        return
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        // Schedule background task
+        scheduleBackgroundTask()
     }
     
-    do {
-        // Fetch profile from API
-        let profileResponse = try await passpointClient.fetchIOSPasspointProfile()
-        
-        // Install profile
-        let result = try await profileManager.installProfileFromResponse(profileResponse)
-        if result.success {
-            print("Profile installed: \(result.profileId ?? "unknown")")
-        } else {
-            print("Installation failed: \(result.errorMessage ?? "Unknown error")")
-        }
-    } catch {
-        print("Error: \(error.localizedDescription)")
-    }
-}
-```
-
-### List Profiles
-
-```swift
-Task {
-    do {
-        let profiles = try await profileManager.listProfiles()
-        print("Found \(profiles.count) installed profiles")
-        for profile in profiles {
-            print("Profile: \(profile.friendlyName) (\(profile.fqdn))")
-        }
-    } catch {
-        print("Failed to list profiles: \(error.localizedDescription)")
-    }
-}
-```
-
-### Remove a Profile
-
-```swift
-Task {
-    do {
-        try await profileManager.removeProfile("profile-id")
-        print("Profile removed successfully")
-    } catch {
-        // On iOS, this will always fail with a limitation error
-        // The cache is cleaned up, but users must remove manually from Settings
-        print("Note: iOS requires manual removal from Settings > Wi-Fi > Passpoint profiles")
-    }
-}
-```
-
-### Validate a Profile
-
-```swift
-Task {
-    do {
-        let result = try await profileManager.verifyProfile(profile)
-        if result.isValid {
-            print("Profile is valid")
-        } else {
-            print("Profile validation failed: \(result.errorMessage ?? "Unknown error")")
-        }
-    } catch {
-        print("Validation error: \(error.localizedDescription)")
-    }
-}
-```
-
-## Complete Integration Example
-
-```swift
-import UIKit
-import UplinkCoreSDK
-import UplinkPasspointProfileSDK
-
-class ViewController: UIViewController {
-    var coreClient: UplinkCoreClient?
-    var passpointClient: UplinkPasspointClient?
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        
-        Task {
-            await initializeSDK()
-        }
-    }
-    
-    private func initializeSDK() async {
-        let deviceInfo = DeviceInfo(
-            deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown",
-            deviceModel: UIDevice.current.model,
-            osVersion: UIDevice.current.systemVersion,
-            osType: "iOS"
-        )
-        
-        coreClient = await UplinkCoreClient.create(
-            baseURL: "https://api-gateway.develop.uplink.xyz/v2",
-            appId: "your-app-id",
-            appSecret: "your-app-secret",
-            deviceInfo: deviceInfo
-        )
-        
-        passpointClient = UplinkPasspointClient(
-            coreClient: coreClient,
-            errorCallback: MyErrorCallback()
-        )
-    }
-    
-    @IBAction func installProfileTapped(_ sender: UIButton) {
-        Task {
-            await installProfile()
-        }
-    }
-    
-    private func installProfile() async {
-        guard let passpointClient = passpointClient else { return }
-        
-        let profileManager = passpointClient.getProfileManager()
-        
-        // Check entitlements
-        let permissionStatus = profileManager.checkPermissions()
-        guard permissionStatus.allPresent else {
-            showAlert(title: "Missing Entitlements", message: permissionStatus.userFriendlyMessage)
-            return
-        }
+    private func scheduleBackgroundTask() {
+        let request = BGProcessingTaskRequest(identifier: "com.uplink.passpoint.profilePolling")
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 1 * 60 * 60) // 1 hour from now
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
         
         do {
-            // Fetch and install profile
-            let profileResponse = try await passpointClient.fetchIOSPasspointProfile()
-            let result = try await profileManager.installProfileFromResponse(profileResponse)
-            
-            if result.success {
-                showAlert(title: "Success", message: "Profile installed successfully")
-            } else {
-                showAlert(title: "Error", message: result.errorMessage ?? "Unknown error")
-            }
+            try BGTaskScheduler.shared.submit(request)
         } catch {
-            showAlert(title: "Error", message: error.localizedDescription)
+            print("Could not schedule background task: \(error)")
         }
-    }
-    
-    private func showAlert(title: String, message: String) {
-        DispatchQueue.main.async {
-            let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "OK", style: .default))
-            self.present(alert, animated: true)
-        }
-    }
-}
-
-class MyErrorCallback: PasspointErrorCallback {
-    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
-        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
     }
 }
 ```
 
-## Next Steps
+## Entitlement Validation
 
-- Read the [Passpoint SDK API Reference](passpoint-sdk.md) for detailed API documentation
-- Check [Entitlements Guide](entitlements.md) for entitlement configuration
-- See [Code Examples](examples.md) for more examples
-- Review [Best Practices](../best-practices.md) for recommended patterns
+The SDK provides methods to check entitlements:
+
+```swift
+let profileManager = passpointClient.getProfileManager()
+
+// Check permissions/entitlements
+let permissionStatus = profileManager.checkPermissions()
+if permissionStatus.allPresent {
+    // Entitlements are valid, proceed
+} else {
+    // Missing entitlements
+    print("Missing entitlements: \(permissionStatus.missingPermissions.joined(separator: ", "))")
+    print("Message: \(permissionStatus.userFriendlyMessage)")
+}
+
+// Validate entitlements specifically
+let entitlementStatus = profileManager.validateEntitlements()
+if entitlementStatus.allPresent {
+    // All entitlements present
+} else {
+    // Missing entitlements
+    let missing = profileManager.getMissingEntitlements()
+    print("Missing: \(missing.joined(separator: ", "))")
+}
+```
+
+## Common Issues
+
+### Entitlement Not Found
+
+**Issue**: SDK reports missing entitlements even after configuration
+
+**Solutions**:
+1. Verify entitlements are enabled in Apple Developer Portal
+2. Ensure provisioning profile includes the entitlements
+3. Clean and rebuild the project
+4. Verify entitlements file is included in the target
+5. Check that the correct Team is selected in Xcode
+
+### Background Task Not Registered
+
+**Issue**: Background task registration fails
+
+**Solutions**:
+1. Verify `BGTaskSchedulerPermittedIdentifiers` is in `Info.plist`
+2. Ensure background task identifier matches exactly
+3. Register in `AppDelegate.application(_:didFinishLaunchingWithOptions:)`
+4. Check that background modes are enabled in capabilities
+
+### Automatic Signing Issues
+
+**Issue**: Xcode shows signing errors
+
+**Solutions**:
+1. Ensure your Team ID is set in project settings
+2. Verify App ID has required capabilities enabled
+3. Let Xcode automatically manage signing, or manually select provisioning profile
+4. Clean derived data and rebuild
+
+## Verification Checklist
+
+- [ ] Entitlements enabled in Apple Developer Portal
+- [ ] Provisioning profile updated and installed
+- [ ] Entitlements file configured in Xcode
+- [ ] Capabilities added in Signing & Capabilities
+- [ ] Background task identifier in Info.plist
+- [ ] Background task registered in AppDelegate
+- [ ] SDK entitlement validation passes
+
+## Best Practices
+
+1. **Configure Early**: Set up entitlements before integrating the SDK
+2. **Verify Setup**: Use SDK's entitlement validation methods
+3. **Handle Missing Entitlements**: Provide clear error messages to users
+4. **Test on Device**: Entitlements don't work in simulator for some features
+5. **Document Requirements**: Inform users about required capabilities
+
+## Related Documentation
+
+- [Passpoint SDK API Reference](passpoint-sdk.md)
+- [Getting Started Guide](getting-started.md)
+- [Code Examples](examples.md)
+- [Troubleshooting](../troubleshooting.md)
