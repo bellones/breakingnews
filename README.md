@@ -1,51 +1,280 @@
-## SDK Initialization
+## Prerequisites
 
-1. **Initialize Early**: Initialize SDK in `Application.onCreate()` (Android) or `AppDelegate` (iOS)
-2. **Use Service Pattern**: Use service singleton for centralized access
-3. **Store References**: Store client references for reuse
-4. **Handle Errors**: Wrap initialization in error handling
+- Xcode 14.0 or higher
+- iOS 13.0 or higher
+- CocoaPods (`sudo gem install cocoapods`) or Swift Package Manager
+- Apple Developer account with entitlements configured
 
-## Error Handling
+## SDK Integration
 
-1. **Always Handle Errors**: Wrap all SDK calls in try-catch or Result handling
-2. **Check Error Types**: Handle different error types appropriately
-3. **Provide User Feedback**: Show user-friendly error messages
-4. **Log Errors**: Log errors for debugging
-5. **Implement Retry Logic**: For transient errors, implement retry logic
-6. **Use Error Callbacks**: Implement error callbacks for installation errors
+### Step 1: Add Dependencies
 
-## Lifecycle Management
+#### Using CocoaPods
 
-1. **Let SDK Manage**: Don't manually manage polling/renewal unless necessary
-2. **Handle Errors**: Implement error callbacks for retry notifications
-3. **Monitor Status**: Check profile status periodically
-4. **Push Notifications**: Use push notifications for immediate updates when available
-5. **Background Tasks**: Ensure background tasks are properly configured (iOS)
+Add to your `Podfile`:
 
-## Security
+```ruby
+pod 'UplinkCoreSDK', :path => '../UplinkSDKiOS'
+pod 'UplinkPasspointProfileSDK', :path => '../UplinkSDKiOS'
+```
 
-1. **Secure Storage**: SDK uses encrypted storage - don't store credentials elsewhere
-2. **Token Management**: Let SDK manage tokens - don't store tokens manually
-3. **Credential Handling**: Never log or expose credentials
-4. **Network Security**: All API calls use HTTPS
+Then run:
 
-## Performance
+```bash
+pod install
+```
 
-1. **Reuse Clients**: Create clients once and reuse
-2. **Async Operations**: Use async/await (iOS) or coroutines (Android)
-3. **Background Operations**: Use background tasks for polling
-4. **Cache Usage**: Trust SDK cache - don't duplicate caching
+#### Using Swift Package Manager
 
-## Testing
+Add the SDK packages to your project dependencies.
 
-1. **Test Permissions**: Test permission flows
-2. **Test Errors**: Test error handling paths
-3. **Test Lifecycle**: Test polling and renewal
-4. **Test on Device**: Test on physical devices (especially iOS)
+### Step 2: Configure Entitlements
 
-## Related Documentation
+1. Enable capabilities in Apple Developer Portal (see [Entitlements Guide](entitlements.md))
+2. Add entitlements file to your project
+3. Configure in Xcode Signing & Capabilities
 
-- [Getting Started - Android](../android/getting-started.md)
-- [Getting Started - iOS](../ios/getting-started.md)
-- [Error Handling](error-handling.md)
-- [Lifecycle Management](lifecycle-management.md)
+### Step 3: Configure Background Tasks
+
+Add to `Info.plist`:
+
+```xml
+<key>BGTaskSchedulerPermittedIdentifiers</key>
+<array>
+    <string>com.uplink.passpoint.profilePolling</string>
+</array>
+```
+
+### Step 4: Initialize SDK
+
+Initialize the SDK in your `AppDelegate`:
+
+```swift
+import UIKit
+import UplinkCoreSDK
+import UplinkPasspointProfileSDK
+
+@main
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    
+    var coreClient: UplinkCoreClient?
+    var passpointClient: UplinkPasspointClient?
+    
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        // Register background task
+        PasspointProfilePoller.registerBackgroundTask()
+        
+        // Initialize SDK
+        Task {
+            await initializeSDK()
+        }
+        
+        return true
+    }
+    
+    private func initializeSDK() async {
+        let deviceInfo = DeviceInfo(
+            deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown",
+            deviceModel: UIDevice.current.model,
+            osVersion: UIDevice.current.systemVersion,
+            osType: "iOS"
+        )
+        
+        coreClient = await UplinkCoreClient.create(
+            baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+            appId: "your-app-id",
+            appSecret: "your-app-secret",
+            deviceInfo: deviceInfo
+        )
+        
+        passpointClient = UplinkPasspointClient(
+            coreClient: coreClient,
+            errorCallback: MyErrorCallback()
+        )
+    }
+}
+
+class MyErrorCallback: PasspointErrorCallback {
+    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
+        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
+    }
+}
+```
+
+## Basic Usage
+
+### Install a Profile
+
+```swift
+Task {
+    // Check entitlements first
+    let profileManager = passpointClient.getProfileManager()
+    let permissionStatus = profileManager.checkPermissions()
+    guard permissionStatus.allPresent else {
+        print("Missing entitlements: \(permissionStatus.missingPermissions.joined(separator: ", "))")
+        return
+    }
+    
+    do {
+        // Fetch profile from API
+        let profileResponse = try await passpointClient.fetchIOSPasspointProfile()
+        
+        // Install profile
+        let result = try await profileManager.installProfileFromResponse(profileResponse)
+        if result.success {
+            print("Profile installed: \(result.profileId ?? "unknown")")
+        } else {
+            print("Installation failed: \(result.errorMessage ?? "Unknown error")")
+        }
+    } catch {
+        print("Error: \(error.localizedDescription)")
+    }
+}
+```
+
+### List Profiles
+
+```swift
+Task {
+    do {
+        let profiles = try await profileManager.listProfiles()
+        print("Found \(profiles.count) installed profiles")
+        for profile in profiles {
+            print("Profile: \(profile.friendlyName) (\(profile.fqdn))")
+        }
+    } catch {
+        print("Failed to list profiles: \(error.localizedDescription)")
+    }
+}
+```
+
+### Remove a Profile
+
+```swift
+Task {
+    do {
+        try await profileManager.removeProfile("profile-id")
+        print("Profile removed successfully")
+    } catch {
+        // On iOS, this will always fail with a limitation error
+        // The cache is cleaned up, but users must remove manually from Settings
+        print("Note: iOS requires manual removal from Settings > Wi-Fi > Passpoint profiles")
+    }
+}
+```
+
+### Validate a Profile
+
+```swift
+Task {
+    do {
+        let result = try await profileManager.verifyProfile(profile)
+        if result.isValid {
+            print("Profile is valid")
+        } else {
+            print("Profile validation failed: \(result.errorMessage ?? "Unknown error")")
+        }
+    } catch {
+        print("Validation error: \(error.localizedDescription)")
+    }
+}
+```
+
+## Complete Integration Example
+
+```swift
+import UIKit
+import UplinkCoreSDK
+import UplinkPasspointProfileSDK
+
+class ViewController: UIViewController {
+    var coreClient: UplinkCoreClient?
+    var passpointClient: UplinkPasspointClient?
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        Task {
+            await initializeSDK()
+        }
+    }
+    
+    private func initializeSDK() async {
+        let deviceInfo = DeviceInfo(
+            deviceId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown",
+            deviceModel: UIDevice.current.model,
+            osVersion: UIDevice.current.systemVersion,
+            osType: "iOS"
+        )
+        
+        coreClient = await UplinkCoreClient.create(
+            baseURL: "https://api-gateway.develop.uplink.xyz/v2",
+            appId: "your-app-id",
+            appSecret: "your-app-secret",
+            deviceInfo: deviceInfo
+        )
+        
+        passpointClient = UplinkPasspointClient(
+            coreClient: coreClient,
+            errorCallback: MyErrorCallback()
+        )
+    }
+    
+    @IBAction func installProfileTapped(_ sender: UIButton) {
+        Task {
+            await installProfile()
+        }
+    }
+    
+    private func installProfile() async {
+        guard let passpointClient = passpointClient else { return }
+        
+        let profileManager = passpointClient.getProfileManager()
+        
+        // Check entitlements
+        let permissionStatus = profileManager.checkPermissions()
+        guard permissionStatus.allPresent else {
+            showAlert(title: "Missing Entitlements", message: permissionStatus.userFriendlyMessage)
+            return
+        }
+        
+        do {
+            // Fetch and install profile
+            let profileResponse = try await passpointClient.fetchIOSPasspointProfile()
+            let result = try await profileManager.installProfileFromResponse(profileResponse)
+            
+            if result.success {
+                showAlert(title: "Success", message: "Profile installed successfully")
+            } else {
+                showAlert(title: "Error", message: result.errorMessage ?? "Unknown error")
+            }
+        } catch {
+            showAlert(title: "Error", message: error.localizedDescription)
+        }
+    }
+    
+    private func showAlert(title: String, message: String) {
+        DispatchQueue.main.async {
+            let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            self.present(alert, animated: true)
+        }
+    }
+}
+
+class MyErrorCallback: PasspointErrorCallback {
+    func onInstallationError(error: Error, attempt: Int, willRetry: Bool) {
+        print("Installation error (attempt \(attempt), willRetry: \(willRetry)): \(error.localizedDescription)")
+    }
+}
+```
+
+## Next Steps
+
+- Read the [Passpoint SDK API Reference](passpoint-sdk.md) for detailed API documentation
+- Check [Entitlements Guide](entitlements.md) for entitlement configuration
+- See [Code Examples](examples.md) for more examples
+- Review [Best Practices](../best-practices.md) for recommended patterns
