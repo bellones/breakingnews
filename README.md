@@ -1,211 +1,51 @@
-## Complete Integration Example
+## SDK Initialization
 
-```kotlin
-class MainActivity : AppCompatActivity() {
-    private lateinit var passpointClient: UplinkPasspointClient
-    private lateinit var coreClient: UplinkCoreClient
-    
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        
-        lifecycleScope.launch {
-            initializeSDK()
-        }
-    }
-    
-    private suspend fun initializeSDK() {
-        val deviceInfo = DeviceInfo(
-            deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID),
-            deviceModel = Build.MODEL,
-            osVersion = Build.VERSION.RELEASE,
-            osType = "Android"
-        )
-        
-        coreClient = UplinkCoreClient.fromService(
-            baseUrl = "https://api-gateway.develop.uplink.xyz/v2",
-            appId = "your-app-id",
-            appSecret = "your-app-secret",
-            deviceInfo = deviceInfo,
-            context = applicationContext
-        ) ?: return
-        
-        passpointClient = UplinkPasspointClient.create(
-            context = applicationContext,
-            coreClient = coreClient,
-            errorCallback = object : PasspointErrorCallback {
-                override fun onInstallationError(error: Throwable, attempt: Int, willRetry: Boolean) {
-                    Log.e("App", "Installation error (attempt $attempt, willRetry: $willRetry): ${error.message}")
-                }
-            }
-        )
-    }
-    
-    private fun installProfile() {
-        lifecycleScope.launch {
-            val profileManager = passpointClient.profileManager()
-            
-            // Check permissions
-            if (!profileManager.hasAllPermissions()) {
-                profileManager.requestPermissions(this@MainActivity) { result ->
-                    if (result.allGranted) {
-                        installProfile()
-                    }
-                }
-                return@launch
-            }
-            
-            // Fetch and install
-            try {
-                val profileResponse = coreClient.getAndroidPasspointProfile()
-                val result = profileManager.installProfileFromResponse(profileResponse)
-                result.onSuccess { installResult ->
-                    if (installResult.success) {
-                        showMessage("Profile installed: ${installResult.profileId}")
-                    } else {
-                        showError("Installation failed: ${installResult.errorMessage}")
-                    }
-                }.onFailure { error ->
-                    showError("Error: ${error.message}")
-                }
-            } catch (e: Exception) {
-                showError("Failed: ${e.message}")
-            }
-        }
-    }
-    
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        passpointClient.profileManager().handlePermissionResult(requestCode, permissions, grantResults)
-    }
-}
-```
+1. **Initialize Early**: Initialize SDK in `Application.onCreate()` (Android) or `AppDelegate` (iOS)
+2. **Use Service Pattern**: Use service singleton for centralized access
+3. **Store References**: Store client references for reuse
+4. **Handle Errors**: Wrap initialization in error handling
 
-## Profile Installation Example
+## Error Handling
 
-```kotlin
-suspend fun installProfileExample() {
-    val profileManager = passpointClient.profileManager()
-    
-    // Check permissions
-    val permissionStatus = profileManager.checkPermissions()
-    if (!permissionStatus.allGranted) {
-        // Request permissions
-        return
-    }
-    
-    // Fetch profile
-    val profileResponse = coreClient.getAndroidPasspointProfile()
-    
-    // Install
-    val result = profileManager.installProfileFromResponse(profileResponse)
-    result.onSuccess { installResult ->
-        if (installResult.success) {
-            Log.i("App", "Profile installed: ${installResult.profileId}")
-        }
-    }
-}
-```
+1. **Always Handle Errors**: Wrap all SDK calls in try-catch or Result handling
+2. **Check Error Types**: Handle different error types appropriately
+3. **Provide User Feedback**: Show user-friendly error messages
+4. **Log Errors**: Log errors for debugging
+5. **Implement Retry Logic**: For transient errors, implement retry logic
+6. **Use Error Callbacks**: Implement error callbacks for installation errors
 
-## Profile Listing Example
+## Lifecycle Management
 
-```kotlin
-suspend fun listProfilesExample() {
-    val result = profileManager.listProfiles()
-    result.onSuccess { profiles ->
-        profiles.forEach { profile ->
-            Log.d("App", "Profile: ${profile.friendlyName} (${profile.fqdn})")
-        }
-    }
-}
-```
+1. **Let SDK Manage**: Don't manually manage polling/renewal unless necessary
+2. **Handle Errors**: Implement error callbacks for retry notifications
+3. **Monitor Status**: Check profile status periodically
+4. **Push Notifications**: Use push notifications for immediate updates when available
+5. **Background Tasks**: Ensure background tasks are properly configured (iOS)
 
-## Profile Removal Example
+## Security
 
-```kotlin
-suspend fun removeProfileExample(profileId: String) {
-    val result = profileManager.removeProfile(profileId)
-    result.onSuccess {
-        Log.i("App", "Profile removed")
-    }.onFailure { error ->
-        Log.e("App", "Removal failed: ${error.message}")
-    }
-}
-```
+1. **Secure Storage**: SDK uses encrypted storage - don't store credentials elsewhere
+2. **Token Management**: Let SDK manage tokens - don't store tokens manually
+3. **Credential Handling**: Never log or expose credentials
+4. **Network Security**: All API calls use HTTPS
 
-## Error Handling Example
+## Performance
 
-```kotlin
-suspend fun errorHandlingExample() {
-    try {
-        val profileResponse = coreClient.getAndroidPasspointProfile()
-        val result = profileManager.installProfileFromResponse(profileResponse)
-        result.onFailure { error ->
-            when (error) {
-                is SecurityException -> {
-                    // Permission error
-                    requestPermissions()
-                }
-                is IllegalArgumentException -> {
-                    // Invalid configuration
-                    showError("Invalid profile configuration")
-                }
-                is ApiException.NetworkError -> {
-                    // Network error - retry
-                    retryInstallation()
-                }
-                else -> {
-                    // Other errors
-                    showError("Installation failed: ${error.message}")
-                }
-            }
-        }
-    } catch (e: ApiException.Unauthorized) {
-        // Authentication error
-        reAuthenticate()
-    }
-}
-```
+1. **Reuse Clients**: Create clients once and reuse
+2. **Async Operations**: Use async/await (iOS) or coroutines (Android)
+3. **Background Operations**: Use background tasks for polling
+4. **Cache Usage**: Trust SDK cache - don't duplicate caching
 
-## Lifecycle Management Example
+## Testing
 
-```kotlin
-// Manual polling
-passpointClient.checkForProfileUpdates()
+1. **Test Permissions**: Test permission flows
+2. **Test Errors**: Test error handling paths
+3. **Test Lifecycle**: Test polling and renewal
+4. **Test on Device**: Test on physical devices (especially iOS)
 
-// Certificate monitoring
-passpointClient.checkCertificateMonitoring()
+## Related Documentation
 
-// Renewal check
-passpointClient.checkRenewal()
-```
-
-## Permission Handling Example
-
-```kotlin
-fun handlePermissions() {
-    val profileManager = passpointClient.profileManager()
-    
-    if (!profileManager.hasAllPermissions()) {
-        profileManager.requestPermissions(this) { result ->
-            when {
-                result.allGranted -> {
-                    // Proceed
-                }
-                result.shouldShowRationale -> {
-                    // Show rationale
-                    showPermissionRationale()
-                }
-                else -> {
-                    // Guide to settings
-                    showSettingsDialog()
-                }
-            }
-        }
-    }
-}
-```
+- [Getting Started - Android](../android/getting-started.md)
+- [Getting Started - iOS](../ios/getting-started.md)
+- [Error Handling](error-handling.md)
+- [Lifecycle Management](lifecycle-management.md)
