@@ -1,136 +1,155 @@
-## Overview
+## Common Issues and Solutions
 
-The Passpoint SDK uses encrypted storage for profile data and maintains a local cache for profile tracking and metadata.
+### Authentication Failures
 
-## Encrypted Storage
+**Issue**: Authentication fails with 401 Unauthorized
+
+**Solutions**:
+1. Verify `appId` and `appSecret` are correct
+2. Check that credentials are enabled in the backend
+3. Ensure network connectivity
+4. Check token expiration and refresh
+
+**Debug Steps**:
+- Check logs for authentication errors
+- Verify credentials in code
+- Test with curl to verify backend
+
+### Profile Installation Failures
+
+**Issue**: Profile installation fails
+
+**Solutions**:
+1. Check permissions/entitlements are granted
+2. Verify profile configuration is valid
+3. Check network connectivity
+4. Review error messages for specific issues
+
+**Common Errors**:
+- `SecurityException` (Android): Missing permissions
+- `PasspointPermissionError` (iOS): Missing entitlements
+- `IllegalArgumentException`: Invalid profile configuration
+
+### Permission/Entitlement Issues
+
+**Android - Missing Permissions**:
+
+1. Verify permissions in `AndroidManifest.xml`
+2. Request runtime permissions
+3. Check permission status before operations
+
+**iOS - Missing Entitlements**:
+
+1. Verify entitlements in Apple Developer Portal
+2. Check entitlements file in Xcode
+3. Ensure provisioning profile includes entitlements
+4. Clean and rebuild project
+
+### Network Connectivity Issues
+
+**Issue**: API calls fail with network errors
+
+**Solutions**:
+1. Check internet connectivity
+2. Verify base URL is correct
+3. Check firewall/proxy settings
+4. Verify SSL certificates
+
+### Certificate Validation Issues
+
+**Issue**: Certificate validation fails
+
+**Solutions**:
+1. Verify certificate format (PEM, Base64)
+2. Check certificate expiration
+3. Verify CA certificate chain
+4. Review certificate parsing errors in logs
+
+### iOS-Specific Issues
+
+**Background Task Not Working**:
+
+1. Verify `BGTaskSchedulerPermittedIdentifiers` in `Info.plist`
+2. Ensure background task is registered in `AppDelegate`
+3. Check background modes are enabled
+4. Test on physical device (simulator limitations)
+
+**Profile Removal Not Working**:
+
+- This is an iOS limitation
+- Users must remove manually from Settings
+- SDK cleans cache but cannot remove system profile
+
+### Android-Specific Issues
+
+**WorkManager Not Running**:
+
+1. Verify WorkManager dependency
+2. Check battery optimization settings
+3. Ensure app has necessary permissions
+4. Test background execution
+
+## Debug Logging
 
 ### Android
 
-Uses `EncryptedSharedPreferences` for secure storage:
+Enable logging:
 
-- Profile data encryption
-- Credential storage
-- Profile metadata
-- Installation timestamps
-- Expiration dates
-- Profile status
+```kotlin
+// Logs are automatically written to logcat
+// Filter by tag: "PasspointProfileInstaller", "PasspointProfileLister", etc.
+```
 
 ### iOS
 
-Uses Keychain for secure storage:
-
-- Profile data encryption
-- Credential storage
-- Profile metadata
-- Installation timestamps
-- Expiration dates
-- Profile status
-
-## Profile Cache
-
-### Cache Structure
-
-The cache maintains:
-- Profile IDs and FQDNs
-- Installation dates
-- Expiration dates
-- Profile status
-- Last poll time
-
-### Cache Operations
-
-#### Android
-
-```kotlin
-// Cache is managed internally by the SDK
-// Access via ProfileInfoService
-val profileInfo = profileManager.getProfileInfo("profile-id")
-val allInfo = profileManager.getAllProfileInfo()
-```
-
-#### iOS
+Access log file:
 
 ```swift
-// Cache is managed internally by the SDK
-// Access via ProfileInfoService
-let profileInfo = try await profileManager.getProfileInfo(profileId: "profile-id")
-let allInfo = try await profileManager.getAllProfileInfo()
+// Get log file path
+let logPath = passpointClient.getLogFilePath()
+
+// Read log file
+let logContents = passpointClient.readLogFile()
+
+// Get log file URL for sharing
+let logURL = passpointClient.getLogFileURL()
 ```
 
-## Profile Information Service
+## Log Analysis
 
-Provides access to profile metadata:
+### Common Log Patterns
 
-### Get Profile Info
-
-```kotlin
-// Android
-val profileInfo = profileManager.getProfileInfo("profile-id")
-profileInfo?.let {
-    Log.i("App", "Installed: ${it.installationDate}")
-    Log.i("App", "Expires: ${it.expirationDate}")
-    Log.i("App", "Status: ${it.status}")
-}
+**Installation Success**:
+```
+✅ Profile installed successfully: profile-123
 ```
 
-```swift
-// iOS
-if let profileInfo = try await profileManager.getProfileInfo(profileId: "profile-id") {
-    print("Installed: \(profileInfo.installationDate)")
-    print("Expires: \(profileInfo.expirationDate?.description ?? "Never")")
-    print("Status: \(profileInfo.status)")
-}
+**Installation Failure**:
+```
+❌ Installation failed: Permission denied
 ```
 
-### Get All Profile Info
-
-```kotlin
-// Android
-val allInfo = profileManager.getAllProfileInfo()
-allInfo.forEach { info ->
-    Log.d("App", "Profile ${info.profileId}: ${info.status}")
-}
+**Polling**:
+```
+Checking for profile updates from backend API...
+Successfully fetched profile from API: profile-123
 ```
 
-```swift
-// iOS
-let allInfo = try await profileManager.getAllProfileInfo()
-for info in allInfo {
-    print("Profile \(info.profileId): \(info.status)")
-}
-```
+## Getting Help
 
-## Profile Status Tracking
-
-The SDK tracks profile status:
-
-- **ACTIVE**: Profile is installed and valid
-- **EXPIRED**: Certificate has expired
-- **PENDING_RENEWAL**: Certificate is within renewal window (90 days before expiration)
-
-## Cache Synchronization
-
-The cache is automatically synchronized when:
-- Profile is installed
-- Profile is removed
-- Profile is updated
-- Certificate monitoring detects changes
-
-## Security Considerations
-
-1. **Encryption**: All sensitive data is encrypted at rest
-2. **Keychain/EncryptedSharedPreferences**: Uses platform secure storage
-3. **No Plain Text**: Credentials are never stored in plain text
-4. **Automatic Cleanup**: Cache is cleaned when profiles are removed
-
-## Best Practices
-
-1. **Trust the Cache**: The SDK manages cache automatically
-2. **Check Status**: Use profile info to check status before operations
-3. **Monitor Expiration**: Use expiration dates for renewal planning
-4. **Don't Modify Cache**: Don't directly modify cache data
+1. Check logs for error messages
+2. Review error codes and descriptions
+3. Verify configuration (permissions, entitlements, base URL)
+4. Test with minimal example
+5. Contact SDK support with:
+   - Error messages
+   - Log files
+   - Platform and version
+   - Steps to reproduce
 
 ## Related Documentation
 
-- [Lifecycle Management](lifecycle-management.md)
 - [Error Handling](error-handling.md)
+- [Best Practices](best-practices.md)
+- [Permissions Guide](../android/permissions.md)
+- [Entitlements Guide](../ios/entitlements.md)
