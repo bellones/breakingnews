@@ -1,92 +1,30 @@
-# Swift Package Manager vs CocoaPods
+# Swift Package Creation Guide
 
 ## Overview
 
-DWSDK supports both Swift Package Manager (SPM) and CocoaPods for dependency management. This document compares the two approaches and explains when to use each.
+DWSDK is distributed as a Swift Package, allowing easy integration into iOS projects using Swift Package Manager (SPM). This document explains how the Swift Package is structured and how to work with it.
 
-## Quick Comparison
+## Package.swift Structure
 
-| Feature                   | Swift Package Manager   | CocoaPods                 |
-| ------------------------- | ----------------------- | ------------------------- |
-| **Native Integration**    | ✅ Built into Xcode     | ❌ Requires separate tool |
-| **Setup Complexity**      | ✅ Simple               | ⚠️ Requires Podfile       |
-| **Dependency Resolution** | ✅ Fast                 | ⚠️ Can be slower          |
-| **Subspecs**              | ❌ Not supported        | ✅ Supported              |
-| **Resource Bundles**      | ⚠️ Limited (Swift 5.3+) | ✅ Full support           |
-| **Workspace Required**    | ❌ No                   | ✅ Yes (.xcworkspace)     |
-| **React Native**          | ⚠️ Limited support      | ✅ Full support           |
-| **Maturity**              | ⚠️ Newer (2019+)        | ✅ Mature (2011+)         |
-
-## Swift Package Manager (SPM)
-
-### Advantages
-
-**1. Native Xcode Integration**
-
-- Built directly into Xcode (11+)
-- No additional tools required
-- Seamless workflow
-
-**2. Faster Dependency Resolution**
-
-- Parallel dependency resolution
-- Incremental builds
-- Better caching
-
-**3. Simpler Setup**
-
-- Just add package URL in Xcode
-- No Podfile needed
-- No `pod install` command
-
-**4. Better for Open Source**
-
-- Standard Swift ecosystem tool
-- Works with GitHub, GitLab, etc.
-- Version pinning via Git tags
-
-**5. Modern Swift Features**
-
-- Supports Swift 5.3+ resource bundles
-- Better module system
-- Swift-only (no Objective-C bridge needed)
-
-### Disadvantages
-
-**1. Limited Subspec Support**
-
-- Cannot split package into subspecs
-- All or nothing inclusion
-- Larger binary size if only need part
-
-**2. Resource Bundle Limitations**
-
-- Resource bundle support added in Swift 5.3
-- Requires explicit resource declarations
-- More complex resource loading
-
-**3. React Native Integration**
-
-- React Native primarily uses CocoaPods
-- SPM support is limited
-- May require additional setup
-
-**4. Workspace Management**
-
-- Cannot use with existing `.xcworkspace`
-- Conflicts with CocoaPods workspaces
-- Must choose one or the other
-
-### DWSDK SPM Implementation
-
-**Package.swift Structure:**
+The `Package.swift` file is located at `ios/Package.swift` and defines the Swift Package manifest:
 
 ```swift
+// swift-tools-version:5.0
+import PackageDescription
+
 let package = Package(
     name: "DWSDK",
-    platforms: [.iOS(.v13)],
+    platforms: [
+        .iOS(.v13)
+    ],
     products: [
-        .library(name: "DWSDK", targets: ["DWSDK"])
+        .library(
+            name: "DWSDK",
+            targets: ["DWSDK"]
+        ),
+    ],
+    dependencies: [
+        // Add your dependencies here
     ],
     targets: [
         .target(
@@ -94,390 +32,406 @@ let package = Package(
             dependencies: [],
             path: "DWSDK",
             exclude: ["Info.plist"]
-        )
-    ]
+        ),
+    ],
+    swiftLanguageVersions: [.v5]
 )
 ```
 
-**Characteristics:**
+## Package Manifest Details
 
-- Single target (`DWSDK`)
-- All code included together
-- Simple, flat structure
-- Resources handled via bundle resolution
-
-**Usage:**
+### Platform Requirements
 
 ```swift
-// In Xcode: File > Add Packages...
-// Or in Package.swift:
+platforms: [
+    .iOS(.v13)
+]
+```
+
+- **Minimum iOS Version**: 13.0
+- This ensures compatibility with the SDK's UIKit-based implementation
+- All iOS 13+ features are available (e.g., `UIWindowScene`)
+
+### Product Definition
+
+```swift
+products: [
+    .library(
+        name: "DWSDK",
+        targets: ["DWSDK"]
+    ),
+]
+```
+
+- **Product Type**: Dynamic library (default)
+- **Product Name**: `DWSDK` (matches the framework name)
+- **Target**: Links to the `DWSDK` target
+
+### Target Configuration
+
+```swift
+.target(
+    name: "DWSDK",
+    dependencies: [],
+    path: "DWSDK",
+    exclude: ["Info.plist"]
+)
+```
+
+**Key Properties:**
+
+- **name**: `"DWSDK"` - Target identifier
+- **dependencies**: Currently empty (no external dependencies)
+- **path**: `"DWSDK"` - Relative path to source directory
+- **exclude**: `["Info.plist"]` - Files to exclude from package
+
+**Source Directory Structure:**
+
+```
+ios/
+├── Package.swift
+└── DWSDK/
+    ├── Core/
+    │   ├── DWSDKCore.swift
+    │   └── DWSDKConfig.swift
+    ├── Models/
+    │   └── DWSDKModel.swift
+    ├── UI/
+    │   ├── *.swift (all UI files)
+    │   └── Assets/ (images)
+    └── DWSDK.h (umbrella header)
+```
+
+### Path Exclusions
+
+The `Info.plist` file is excluded because:
+
+- It's not needed for Swift Package distribution
+- SPM handles Info.plist generation automatically
+- Prevents conflicts with app's Info.plist
+
+### Swift Language Version
+
+```swift
+swiftLanguageVersions: [.v5]
+```
+
+- Requires Swift 5.0 or later
+- Ensures compatibility with modern Swift features
+- Matches the `swift-tools-version` declaration
+
+## Building the Package
+
+### Command-Line Building
+
+Build the package from the command line:
+
+```bash
+cd ios
+swift build
+```
+
+**Output:**
+
+- Builds the package for the current platform
+- Creates artifacts in `.build/` directory
+- Validates package structure and dependencies
+
+### Xcode Integration
+
+**Adding the Package to Xcode:**
+
+1. Open your Xcode project
+2. Go to **File** > **Add Packages...**
+3. Enter the repository URL:
+   ```
+   https://github.com/reddrummer/dwallet.mobile-sdk.git
+   ```
+4. Select the version (e.g., `1.0.0`)
+5. Click **Add Package**
+
+**Local Development:**
+
+For local development, you can add the package using a local path:
+
+1. In Xcode, go to **File** > **Add Packages...**
+2. Click **Add Local...**
+3. Navigate to the `ios/` directory
+4. Select the directory containing `Package.swift`
+
+**Alternative: Using Package.swift in Your Project**
+
+If your project uses SPM, add to your `Package.swift`:
+
+```swift
 dependencies: [
     .package(url: "https://github.com/reddrummer/dwallet.mobile-sdk.git", from: "1.0.0")
 ]
 ```
 
-## CocoaPods
+### Testing the Package
 
-### Advantages
+**Unit Tests:**
 
-**1. Mature Ecosystem**
-
-- Established since 2011
-- Large community
-- Extensive documentation
-
-**2. Subspec Support**
-
-- Can split into modular components
-- Selective inclusion
-- Smaller binary size
-
-**3. Better Resource Bundle Management**
-
-- Native resource bundle support
-- Explicit resource declarations
-- Easier asset management
-
-**4. React Native Integration**
-
-- React Native uses CocoaPods by default
-- Seamless integration
-- Well-documented process
-
-**5. Complex Dependency Trees**
-
-- Better handling of transitive dependencies
-- Dependency version resolution
-- Conflict resolution
-
-### Disadvantages
-
-**1. Additional Tool Required**
-
-- Must install CocoaPods gem
-- Requires Ruby environment
-- Separate from Xcode
-
-**2. Workspace Requirement**
-
-- Creates `.xcworkspace` file
-- Must use workspace, not project
-- Can conflict with SPM
-
-**3. Slower Dependency Resolution**
-
-- Sequential resolution
-- Can be slow for large projects
-- Less efficient caching
-
-**4. Podfile Maintenance**
-
-- Requires Podfile configuration
-- Must run `pod install` after changes
-- Lock file management
-
-### DWSDK CocoaPods Implementation
-
-**Podspec Structure:**
-
-```ruby
-Pod::Spec.new do |spec|
-  spec.name = "DWSDK"
-  spec.version = "1.0.0"
-
-  # Default subspec includes all
-  spec.default_subspecs = "Default"
-
-  spec.subspec "Default" do |default|
-    default.dependency "DWSDK/Core"
-    default.dependency "DWSDK/Models"
-    default.dependency "DWSDK/UI"
-  end
-
-  spec.subspec "Core" do |core|
-    core.source_files = "DWSDK/Core/**/*.{h,m,swift}"
-  end
-
-  spec.subspec "Models" do |models|
-    models.source_files = "DWSDK/Models/**/*.{h,m,swift}"
-  end
-
-  spec.subspec "UI" do |ui|
-    ui.source_files = "DWSDK/UI/**/*.{h,m,swift}"
-    ui.resource_bundles = {
-      "DWSDK" => ["DWSDK/UI/Assets/**/*.png"]
-    }
-    ui.resources = "DWSDK/UI/Theme/Fonts/**/*.ttf"
-  end
-end
-```
-
-**Characteristics:**
-
-- Modular subspecs (Core, Models, UI)
-- Explicit resource bundle declarations
-- Selective inclusion possible
-- Better resource management
-
-**Usage:**
-
-```ruby
-# Podfile
-platform :ios, '13.0'
-pod 'DWSDK', :path => '../ios'
-
-# Or for specific subspecs:
-pod 'DWSDK/Core'
-pod 'DWSDK/UI'
-```
-
-## When to Use Each
-
-### Use Swift Package Manager When:
-
-✅ **New iOS Projects**
-
-- Starting fresh with modern tooling
-- No existing CocoaPods dependencies
-- Want native Xcode integration
-
-✅ **Swift-Only Projects**
-
-- Pure Swift codebase
-- No React Native integration
-- Modern Swift features needed
-
-✅ **Open Source Distribution**
-
-- Publishing to GitHub/GitLab
-- Want standard Swift ecosystem
-- Simple dependency structure
-
-✅ **Fast Development Cycle**
-
-- Need quick iteration
-- Want faster builds
-- Minimal setup overhead
-
-### Use CocoaPods When:
-
-✅ **React Native Projects**
-
-- React Native uses CocoaPods by default
-- Need bridge module support
-- Existing CocoaPods setup
-
-✅ **Legacy Projects**
-
-- Existing CocoaPods infrastructure
-- Complex dependency trees
-- Team familiar with CocoaPods
-
-✅ **Modular Inclusion Needed**
-
-- Only need specific components
-- Want to minimize binary size
-- Need subspec granularity
-
-✅ **Resource Bundle Requirements**
-
-- Complex asset management
-- Need explicit resource control
-- Multiple resource bundles
-
-## DWSDK Implementation Differences
-
-### Structure Comparison
-
-**SPM Structure:**
-
-```
-DWSDK/
-├── Core/
-├── Models/
-├── UI/
-└── DWSDK.h
-```
-
-- Single target
-- All code included
-- Simple import: `import DWSDK`
-
-**CocoaPods Structure:**
-
-```
-DWSDK/
-├── Core/        (subspec)
-├── Models/      (subspec)
-└── UI/          (subspec)
-```
-
-- Multiple subspecs
-- Selective inclusion
-- Same import: `import DWSDK`
-
-### Resource Handling
-
-**SPM:**
-
-- Resources loaded via `Bundle(for: DWSDKCore.self)`
-- Fallback to main bundle
-- Programmatic resource resolution
-
-**CocoaPods:**
-
-- Explicit resource bundle: `"DWSDK"`
-- Fonts as resources
-- Images in resource bundle
-- Automatic bundle resolution
-
-### Import Statement
-
-Both use the same import:
+Create a test target in `Package.swift`:
 
 ```swift
-import DWSDK
+.target(
+    name: "DWSDK",
+    dependencies: [],
+    path: "DWSDK",
+    exclude: ["Info.plist"]
+),
+.testTarget(
+    name: "DWSDKTests",
+    dependencies: ["DWSDK"],
+    path: "Tests"
+)
 ```
 
-The underlying module structure is identical; only the distribution method differs.
+**Running Tests:**
 
-## Migration Guide
-
-### From CocoaPods to SPM
-
-**Steps:**
-
-1. Remove CocoaPods:
-
-   ```bash
-   pod deintegrate
-   rm Podfile Podfile.lock
-   ```
-
-2. Remove workspace:
-   - Close `.xcworkspace`
-   - Use `.xcodeproj` instead
-
-3. Add SPM package:
-   - In Xcode: **File** > **Add Packages...**
-   - Enter repository URL
-   - Select version
-
-4. Update imports:
-   - No changes needed (same `import DWSDK`)
-
-5. Update resource loading:
-   - Verify bundle resolution code
-   - Test asset loading
-
-### From SPM to CocoaPods
-
-**Steps:**
-
-1. Remove SPM package:
-   - In Xcode: **File** > **Packages** > **Remove Package**
-
-2. Create Podfile:
-
-   ```ruby
-   platform :ios, '13.0'
-   pod 'DWSDK', :path => '../ios'
-   ```
-
-3. Install pods:
-
-   ```bash
-   pod install
-   ```
-
-4. Open workspace:
-   - Use `.xcworkspace` file
-   - Not `.xcodeproj`
-
-5. Update imports:
-   - No changes needed (same `import DWSDK`)
-
-## React Native Considerations
-
-### CocoaPods (Recommended for React Native)
-
-**Why CocoaPods:**
-
-- React Native uses CocoaPods by default
-- Bridge modules integrate seamlessly
-- Podfile already exists
-- Native module linking works automatically
-
-**Setup:**
-
-```ruby
-# Podfile (in React Native app)
-pod 'DWSDK', :path => '../../../ios'
+```bash
+swift test
 ```
 
-**Bridge Module:**
+Or in Xcode:
 
-- `DWSDKModule.swift` in app's iOS directory
-- Automatically linked via CocoaPods
-- No additional configuration needed
+- Select the test scheme
+- Press `⌘U` to run tests
 
-### SPM with React Native
+## Resource Bundle Handling
 
-**Challenges:**
+### Current Implementation
 
-- React Native doesn't natively support SPM
-- Bridge modules require manual linking
-- Additional setup complexity
-- Not recommended for React Native projects
+The current `Package.swift` does not explicitly define resources. Resources (images, fonts) are handled differently:
 
-**If You Must Use SPM:**
+**Images:**
 
-1. Add package to Xcode project
-2. Manually link bridge module files
-3. Configure build settings
-4. Test thoroughly
+- Currently loaded via bundle resolution in code
+- Uses `Bundle(for: DWSDKCore.self)` to find resource bundle
+- Falls back to main bundle if resource bundle not found
 
-## Best Practices
+**Fonts:**
 
-### For New Projects
+- Font files are in `DWSDK/UI/Theme/Fonts/`
+- Loaded programmatically using `UIFont` registration
+- Registered in `DWSDKTypography` initialization
 
-1. **Evaluate Requirements:**
-   - React Native? → Use CocoaPods
-   - Pure iOS? → Consider SPM
-   - Legacy codebase? → Use CocoaPods
+### Future Resource Bundle Support
 
-2. **Team Familiarity:**
-   - Team knows CocoaPods? → Use CocoaPods
-   - Team prefers SPM? → Use SPM
+For explicit resource bundle support in SPM, you would add:
 
-3. **Dependency Complexity:**
-   - Simple dependencies? → SPM
-   - Complex tree? → CocoaPods
+```swift
+.target(
+    name: "DWSDK",
+    dependencies: [],
+    path: "DWSDK",
+    exclude: ["Info.plist"],
+    resources: [
+        .process("UI/Assets"),
+        .process("UI/Theme/Fonts")
+    ]
+)
+```
 
-### For Existing Projects
+**Note:** This requires Swift 5.3+ and proper resource access patterns.
 
-1. **Stick with Current System:**
-   - Don't migrate unless necessary
-   - Both work equally well
-   - Migration has overhead
+## Package Distribution
 
-2. **If Migrating:**
-   - Test thoroughly
-   - Update documentation
-   - Train team on new system
+### Version Tagging
 
-## Conclusion
+Swift Package Manager uses Git tags for versioning:
 
-Both Swift Package Manager and CocoaPods are valid choices for DWSDK:
+```bash
+git tag 1.0.0
+git push origin 1.0.0
+```
 
-- **SPM**: Better for new, Swift-only projects with native Xcode integration
-- **CocoaPods**: Better for React Native, legacy projects, and modular inclusion
+**Version Format:**
 
-DWSDK supports both equally well, so choose based on your project's specific needs and constraints.
+- Semantic versioning (major.minor.patch)
+- Examples: `1.0.0`, `1.1.0`, `2.0.0`
 
-## Additional Resources
+### Repository Requirements
 
-- [Swift Package Manager Documentation](https://swift.org/package-manager/)
-- [CocoaPods Documentation](https://guides.cocoapods.org/)
-- [DWSDK Swift Package Guide](./SWIFT_PACKAGE.md)
-- [DWSDK React Native Integration](./REACT_NATIVE_INTEGRATION.md)
+For SPM to work, the repository must:
+
+- Be publicly accessible (or use authentication)
+- Have valid Git tags
+- Contain `Package.swift` at the root or specified path
+- Have source files in the correct structure
+
+### Local vs Remote Packages
+
+**Local Package (Development):**
+
+```swift
+.package(path: "../dwallet.mobile-sdk/ios")
+```
+
+**Remote Package (Production):**
+
+```swift
+.package(url: "https://github.com/reddrummer/dwallet.mobile-sdk.git", from: "1.0.0")
+```
+
+## Package Dependencies
+
+### Current Dependencies
+
+The package currently has no external dependencies:
+
+```swift
+dependencies: [
+    // Add your dependencies here
+]
+```
+
+### Adding Dependencies
+
+To add a dependency:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/example/library.git", from: "1.0.0")
+],
+targets: [
+    .target(
+        name: "DWSDK",
+        dependencies: ["LibraryName"],  // Add here
+        path: "DWSDK",
+        exclude: ["Info.plist"]
+    ),
+]
+```
+
+### System Frameworks
+
+System frameworks are automatically available:
+
+- `Foundation`
+- `UIKit`
+- No need to declare in dependencies
+
+## Package Resolution
+
+### Resolving Dependencies
+
+When you add the package, Xcode automatically:
+
+1. Clones the repository
+2. Resolves version constraints
+3. Downloads dependencies
+4. Builds the package
+
+**Manual Resolution:**
+
+```bash
+swift package resolve
+```
+
+### Updating Packages
+
+**In Xcode:**
+
+- **File** > **Packages** > **Update to Latest Package Versions**
+
+**Command Line:**
+
+```bash
+swift package update
+```
+
+## Package Structure Best Practices
+
+### Directory Organization
+
+```
+ios/
+├── Package.swift          # Package manifest
+├── DWSDK/                 # Source directory
+│   ├── Core/             # Core functionality
+│   ├── Models/           # Data models
+│   ├── UI/               # UI components
+│   └── DWSDK.h           # Umbrella header
+└── Tests/                # Test files (if added)
+```
+
+### File Organization
+
+- Group related files in subdirectories
+- Use clear naming conventions
+- Keep public API in root or clearly marked
+- Private implementation details in subdirectories
+
+### Module Map
+
+SPM automatically generates a module map from:
+
+- The package name (`DWSDK`)
+- Public headers (if any)
+- Swift files with `public` or `@objc public` declarations
+
+## Troubleshooting
+
+### Common Issues
+
+**1. Package Not Found**
+
+- Verify repository URL is correct
+- Check Git tags exist
+- Ensure `Package.swift` is in the correct location
+
+**2. Build Errors**
+
+- Check Swift version compatibility
+- Verify platform requirements
+- Ensure all dependencies are resolved
+
+**3. Resource Loading Issues**
+
+- Verify bundle resolution code
+- Check resource file paths
+- Ensure resources are included in build
+
+**4. Import Errors**
+
+```swift
+import DWSDK  // Should work if package is properly added
+```
+
+**Solutions:**
+
+- Clean build folder (`⌘⇧K`)
+- Reset package caches
+- Re-add the package
+
+### Debugging Package Issues
+
+**Check Package Resolution:**
+
+```bash
+swift package show-dependencies
+```
+
+**Verify Package Structure:**
+
+```bash
+swift package describe
+```
+
+**Check Build Settings:**
+
+- In Xcode: **Build Settings** > **Swift Compiler**
+- Verify Swift version matches `swiftLanguageVersions`
+
+## Comparison with CocoaPods
+
+See [SPM_VS_COCOAPODS.md](./SPM_VS_COCOAPODS.md) for a detailed comparison between Swift Package Manager and CocoaPods, including when to use each.
+
+## Next Steps
+
+- Review [SDK_OVERVIEW.md](./SDK_OVERVIEW.md) for SDK usage
+- Check [ARCHITECTURE.md](./ARCHITECTURE.md) for component details
+- See [REACT_NATIVE_INTEGRATION.md](./REACT_NATIVE_INTEGRATION.md) for React Native setup
