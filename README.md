@@ -1,437 +1,167 @@
-# Swift Package Creation Guide
+# React Native Integration with Chase Mock App
 
 ## Overview
 
-DWSDK is distributed as a Swift Package, allowing easy integration into iOS projects using Swift Package Manager (SPM). This document explains how the Swift Package is structured and how to work with it.
+This document explains how the DWSDK library is integrated with the Chase Mock App (a React Native application). It covers the bridge architecture, CocoaPods setup, configuration flow, and end-to-end data flow from JavaScript to native SDK presentation.
 
-## Package.swift Structure
+## Architecture Overview
 
-The `Package.swift` file is located at `ios/Package.swift` and defines the Swift Package manifest:
+The integration follows this flow:
 
-```swift
-// swift-tools-version:5.0
-import PackageDescription
+1. **JavaScript** calls `openDWSDK(options)` from the TypeScript wrapper
+2. **TypeScript** validates options, applies defaults (e.g. theme from system), and calls the native module
+3. **Native module** (`DWSDKModule`) receives the call, parses options into `DWSDKConfig`, finds the root view controller, initializes the SDK if needed, and calls `DWSDKCore.present(from:config:completion:)`
+4. **DWSDKCore** presents the SDK modal (Data Savings Plan onboarding) and invokes the completion handler
+5. **Promise** resolves or rejects back to JavaScript
 
-let package = Package(
-    name: "DWSDK",
-    platforms: [
-        .iOS(.v13)
-    ],
-    products: [
-        .library(
-            name: "DWSDK",
-            targets: ["DWSDK"]
-        ),
-    ],
-    dependencies: [
-        // Add your dependencies here
-    ],
-    targets: [
-        .target(
-            name: "DWSDK",
-            dependencies: [],
-            path: "DWSDK",
-            exclude: ["Info.plist"]
-        ),
-    ],
-    swiftLanguageVersions: [.v5]
-)
-```
-
-## Package Manifest Details
-
-### Platform Requirements
-
-```swift
-platforms: [
-    .iOS(.v13)
-]
-```
-
-- **Minimum iOS Version**: 13.0
-- This ensures compatibility with the SDK's UIKit-based implementation
-- All iOS 13+ features are available (e.g., `UIWindowScene`)
-
-### Product Definition
-
-```swift
-products: [
-    .library(
-        name: "DWSDK",
-        targets: ["DWSDK"]
-    ),
-]
-```
-
-- **Product Type**: Dynamic library (default)
-- **Product Name**: `DWSDK` (matches the framework name)
-- **Target**: Links to the `DWSDK` target
-
-### Target Configuration
-
-```swift
-.target(
-    name: "DWSDK",
-    dependencies: [],
-    path: "DWSDK",
-    exclude: ["Info.plist"]
-)
-```
-
-**Key Properties:**
-
-- **name**: `"DWSDK"` - Target identifier
-- **dependencies**: Currently empty (no external dependencies)
-- **path**: `"DWSDK"` - Relative path to source directory
-- **exclude**: `["Info.plist"]` - Files to exclude from package
-
-**Source Directory Structure:**
+## Repository and Path Layout
 
 ```
-ios/
-├── Package.swift
-└── DWSDK/
-    ├── Core/
-    │   ├── DWSDKCore.swift
-    │   └── DWSDKConfig.swift
-    ├── Models/
-    │   └── DWSDKModel.swift
-    ├── UI/
-    │   ├── *.swift (all UI files)
-    │   └── Assets/ (images)
-    └── DWSDK.h (umbrella header)
+dwallet.mobile-sdk/
+├── ios/                    # DWSDK framework (CocoaPods source)
+│   ├── DWSDK.podspec
+│   ├── DWSDK/
+│   ├── Package.swift
+│   ├── DWSDKModule.m       # Reference implementation
+│   └── DWSDKModule.swift   # Reference implementation
+├── apps/
+│   └── mock-chase/         # React Native app
+│       ├── ios/
+│       │   ├── Podfile     # References DWSDK via path
+│       │   ├── DWSDKModule.m
+│       │   └── DWSDKModule.swift
+│       └── src/
+├── DWSDK.ts                # TypeScript/JS API
+├── index.ts
+└── package.json
 ```
 
-### Path Exclusions
+The Chase Mock App lives under `apps/mock-chase/`. The native iOS app pulls in DWSDK via CocoaPods using a **local path** to the repo’s `ios/` directory.
 
-The `Info.plist` file is excluded because:
+## How the Library Is Imported (CocoaPods)
 
-- It's not needed for Swift Package distribution
-- SPM handles Info.plist generation automatically
-- Prevents conflicts with app's Info.plist
+### Podfile Configuration
 
-### Swift Language Version
+In the Chase Mock App, the Podfile is at `apps/mock-chase/ios/Podfile`:
 
-```swift
-swiftLanguageVersions: [.v5]
+```ruby
+platform :ios, '13.0'
+# ...
+
+target 'MockChase' do
+  config = use_native_modules!
+  use_react_native!(...)
+
+  # DWSDK Framework - using local path
+  pod 'DWSDK', :path => '../../../ios'
+  # ...
+end
 ```
 
-- Requires Swift 5.0 or later
-- Ensures compatibility with modern Swift features
-- Matches the `swift-tools-version` declaration
+**Important details:**
 
-## Building the Package
+- **Path**: `:path => '../../../ios'` is relative to the Podfile’s directory (`apps/mock-chase/ios/`), so it points to the repo root’s `ios/` folder (where `DWSDK.podspec` and the `DWSDK/` source live).
+- CocoaPods uses that path to find `DWSDK.podspec` and build the DWSDK target; the built product is linked into the MockChase app target.
+- After `pod install`, you must open **MockChase.xcworkspace** (not the `.xcodeproj`).
 
-### Command-Line Building
+### Installation Steps
 
-Build the package from the command line:
-
-```bash
-cd ios
-swift build
-```
-
-**Output:**
-
-- Builds the package for the current platform
-- Creates artifacts in `.build/` directory
-- Validates package structure and dependencies
-
-### Xcode Integration
-
-**Adding the Package to Xcode:**
-
-1. Open your Xcode project
-2. Go to **File** > **Add Packages...**
-3. Enter the repository URL:
+1. From repo root, install JS dependencies:
+   ```bash
+   npm install
    ```
-   https://github.com/reddrummer/dwallet.mobile-sdk.git
+2. Install iOS pods:
+   ```bash
+   cd apps/mock-chase/ios
+   pod install
    ```
-4. Select the version (e.g., `1.0.0`)
-5. Click **Add Package**
+3. Open the workspace:
+   ```bash
+   open MockChase.xcworkspace
+   ```
 
-**Local Development:**
+## React Native Bridge Module
 
-For local development, you can add the package using a local path:
+The bridge consists of **Objective-C registration** and **Swift implementation**. Both live in the **app** project (`apps/mock-chase/ios/`). The pod provides the `DWSDK` framework; the app provides the bridge that uses it.
 
-1. In Xcode, go to **File** > **Add Packages...**
-2. Click **Add Local...**
-3. Navigate to the `ios/` directory
-4. Select the directory containing `Package.swift`
+### 1. Objective-C Registration (`DWSDKModule.m`)
 
-**Alternative: Using Package.swift in Your Project**
+Location: `apps/mock-chase/ios/DWSDKModule.m`
 
-If your project uses SPM, add to your `Package.swift`:
+Registers the native module and declares the method JavaScript can call:
 
-```swift
-dependencies: [
-    .package(url: "https://github.com/reddrummer/dwallet.mobile-sdk.git", from: "1.0.0")
-]
+```objc
+#import <React/RCTBridgeModule.h>
+
+@interface RCT_EXTERN_MODULE(DWSDKModule, NSObject)
+
+RCT_EXTERN_METHOD(openDWSDKFlow:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolver
+                  rejecter:(RCTPromiseRejectBlock)rejecter)
+
+@end
 ```
 
-### Testing the Package
+- `RCT_EXTERN_MODULE(DWSDKModule, NSObject)` exposes the Swift class as `"DWSDKModule"`.
+- `RCT_EXTERN_METHOD(openDWSDKFlow:...)` exposes the Promise-based method.
 
-**Unit Tests:**
+### 2. Swift Implementation (`DWSDKModule.swift`)
 
-Create a test target in `Package.swift`:
+Location: `apps/mock-chase/ios/DWSDKModule.swift`
 
-```swift
-.target(
-    name: "DWSDK",
-    dependencies: [],
-    path: "DWSDK",
-    exclude: ["Info.plist"]
-),
-.testTarget(
-    name: "DWSDKTests",
-    dependencies: ["DWSDK"],
-    path: "Tests"
-)
-```
+The Swift class conforms to `RCTBridgeModule` and implements `openDWSDKFlow`:
 
-**Running Tests:**
+- **Parse options**: Builds a `DWSDKConfig` from the `options` dictionary (theme, userName, pendingCount, acceptedCount, rejectedCount).
+- **Root view controller**: Finds the current key window’s root view controller.
+- **Initialize SDK**: If needed, calls `DWSDKCore.shared.initialize()`.
+- **Present**: Calls `DWSDKCore.present(from: rootViewController, config: config, completion: { success in ... })`.
+- **Promise**: Calls `resolver(["success": true])` or `rejecter(...)`.
 
-```bash
-swift test
-```
+All work is done on the main queue.
 
-Or in Xcode:
+### 3. TypeScript/JavaScript API (`DWSDK.ts`)
 
-- Select the test scheme
-- Press `⌘U` to run tests
+Location: `dwallet.mobile-sdk/DWSDK.ts`
 
-## Resource Bundle Handling
+- **Theme**: If not provided, uses system color scheme.
+- **Options**: Maps `OpenDWSDKOptions` to the dictionary expected by the native module.
+- **Validation**: Ensures counts are non-negative integers.
+- **Native call**: `NativeModules.DWSDKModule.openDWSDKFlow(options, resolver, rejecter)` and returns a Promise.
 
-### Current Implementation
+## Configuration Flow (Options to DWSDKConfig)
 
-The current `Package.swift` does not explicitly define resources. Resources (images, fonts) are handled differently:
+1. **JS/TS**: App calls `openDWSDK({ theme, userName, pendingCount, acceptedCount, rejectedCount })`.
+2. **TS**: Applies defaults, validates, then calls `DWSDKModule.openDWSDKFlow(nativeOptions, resolver, rejecter)`.
+3. **Swift**: `parseOptions(_ options:)` maps dictionary to `DWSDKTheme`, optional userName, and counts (default 0, validated >= 0).
+4. **Swift**: Creates `DWSDKConfig(...)` and passes it to `DWSDKCore.present(from:config:completion:)`.
 
-**Images:**
+## How the Chase Mock App Uses the SDK
 
-- Currently loaded via bundle resolution in code
-- Uses `Bundle(for: DWSDKCore.self)` to find resource bundle
-- Falls back to main bundle if resource bundle not found
+### Home screen (`home.tsx`)
 
-**Fonts:**
+- Imports `openDWSDK` from `@drumwave/dwsdk-react-native`.
+- Passes options (e.g. userName, theme, mock counts).
+- On button press, calls `await openDWSDK({ ... })` and handles success/error.
 
-- Font files are in `DWSDK/UI/Theme/Fonts/`
-- Loaded programmatically using `UIFont` registration
-- Registered in `DWSDKTypography` initialization
+### Data Savings Plan banner (`DataSavingsPlanBanner.tsx`)
 
-### Future Resource Bundle Support
+- Renders a banner; button opens the SDK.
+- Calls `openDWSDK({ theme: bannerTheme })` (and optionally other options).
+- Handles loading and errors.
 
-For explicit resource bundle support in SPM, you would add:
+In both cases: **user action** → **openDWSDK()** → **DWSDKModule.openDWSDKFlow** → **DWSDKCore.present** → **native full-screen SDK UI**.
 
-```swift
-.target(
-    name: "DWSDK",
-    dependencies: [],
-    path: "DWSDK",
-    exclude: ["Info.plist"],
-    resources: [
-        .process("UI/Assets"),
-        .process("UI/Theme/Fonts")
-    ]
-)
-```
+## Summary: How the Library Works and Is Imported
 
-**Note:** This requires Swift 5.3+ and proper resource access patterns.
-
-## Package Distribution
-
-### Version Tagging
-
-Swift Package Manager uses Git tags for versioning:
-
-```bash
-git tag 1.0.0
-git push origin 1.0.0
-```
-
-**Version Format:**
-
-- Semantic versioning (major.minor.patch)
-- Examples: `1.0.0`, `1.1.0`, `2.0.0`
-
-### Repository Requirements
-
-For SPM to work, the repository must:
-
-- Be publicly accessible (or use authentication)
-- Have valid Git tags
-- Contain `Package.swift` at the root or specified path
-- Have source files in the correct structure
-
-### Local vs Remote Packages
-
-**Local Package (Development):**
-
-```swift
-.package(path: "../dwallet.mobile-sdk/ios")
-```
-
-**Remote Package (Production):**
-
-```swift
-.package(url: "https://github.com/reddrummer/dwallet.mobile-sdk.git", from: "1.0.0")
-```
-
-## Package Dependencies
-
-### Current Dependencies
-
-The package currently has no external dependencies:
-
-```swift
-dependencies: [
-    // Add your dependencies here
-]
-```
-
-### Adding Dependencies
-
-To add a dependency:
-
-```swift
-dependencies: [
-    .package(url: "https://github.com/example/library.git", from: "1.0.0")
-],
-targets: [
-    .target(
-        name: "DWSDK",
-        dependencies: ["LibraryName"],  // Add here
-        path: "DWSDK",
-        exclude: ["Info.plist"]
-    ),
-]
-```
-
-### System Frameworks
-
-System frameworks are automatically available:
-
-- `Foundation`
-- `UIKit`
-- No need to declare in dependencies
-
-## Package Resolution
-
-### Resolving Dependencies
-
-When you add the package, Xcode automatically:
-
-1. Clones the repository
-2. Resolves version constraints
-3. Downloads dependencies
-4. Builds the package
-
-**Manual Resolution:**
-
-```bash
-swift package resolve
-```
-
-### Updating Packages
-
-**In Xcode:**
-
-- **File** > **Packages** > **Update to Latest Package Versions**
-
-**Command Line:**
-
-```bash
-swift package update
-```
-
-## Package Structure Best Practices
-
-### Directory Organization
-
-```
-ios/
-├── Package.swift          # Package manifest
-├── DWSDK/                 # Source directory
-│   ├── Core/             # Core functionality
-│   ├── Models/           # Data models
-│   ├── UI/               # UI components
-│   └── DWSDK.h           # Umbrella header
-└── Tests/                # Test files (if added)
-```
-
-### File Organization
-
-- Group related files in subdirectories
-- Use clear naming conventions
-- Keep public API in root or clearly marked
-- Private implementation details in subdirectories
-
-### Module Map
-
-SPM automatically generates a module map from:
-
-- The package name (`DWSDK`)
-- Public headers (if any)
-- Swift files with `public` or `@objc public` declarations
+- **Native**: DWSDK is imported into the Chase Mock App as a **CocoaPods pod** from the local path `../../../ios`. The app links against the pod and uses `DWSDKCore` and `DWSDKConfig`.
+- **Bridge**: The **React Native bridge** is in the **app** (`DWSDKModule.m` + `DWSDKModule.swift`), which imports the `DWSDK` module and uses it to initialize and present the SDK with a config from JS options.
+- **JS**: The app imports `openDWSDK` from the dwallet.mobile-sdk package; that API calls `NativeModules.DWSDKModule.openDWSDKFlow` and triggers the native flow.
 
 ## Troubleshooting
 
-### Common Issues
+- **"DWSDKModule is not available"**: Ensure `DWSDKModule.m` and `DWSDKModule.swift` are in the app target and you opened `.xcworkspace` after `pod install`.
+- **"Could not find root view controller"**: Ensure the app has a visible window and root view controller when `openDWSDKFlow` runs.
+- **Pod not found**: From `apps/mock-chase/ios`, `../../../ios` must point to the folder containing `DWSDK.podspec` and `DWSDK/`.
+- **Theme or counts not applied**: Check that JS options match what `parseOptions` expects (theme string, numeric counts).
 
-**1. Package Not Found**
-
-- Verify repository URL is correct
-- Check Git tags exist
-- Ensure `Package.swift` is in the correct location
-
-**2. Build Errors**
-
-- Check Swift version compatibility
-- Verify platform requirements
-- Ensure all dependencies are resolved
-
-**3. Resource Loading Issues**
-
-- Verify bundle resolution code
-- Check resource file paths
-- Ensure resources are included in build
-
-**4. Import Errors**
-
-```swift
-import DWSDK  // Should work if package is properly added
-```
-
-**Solutions:**
-
-- Clean build folder (`⌘⇧K`)
-- Reset package caches
-- Re-add the package
-
-### Debugging Package Issues
-
-**Check Package Resolution:**
-
-```bash
-swift package show-dependencies
-```
-
-**Verify Package Structure:**
-
-```bash
-swift package describe
-```
-
-**Check Build Settings:**
-
-- In Xcode: **Build Settings** > **Swift Compiler**
-- Verify Swift version matches `swiftLanguageVersions`
-
-## Comparison with CocoaPods
-
-See [SPM_VS_COCOAPODS.md](./SPM_VS_COCOAPODS.md) for a detailed comparison between Swift Package Manager and CocoaPods, including when to use each.
-
-## Next Steps
-
-- Review [SDK_OVERVIEW.md](./SDK_OVERVIEW.md) for SDK usage
-- Check [ARCHITECTURE.md](./ARCHITECTURE.md) for component details
-- See [REACT_NATIVE_INTEGRATION.md](./REACT_NATIVE_INTEGRATION.md) for React Native setup
+See also: [SDK_OVERVIEW.md](./SDK_OVERVIEW.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [SPM_VS_COCOAPODS.md](./SPM_VS_COCOAPODS.md).
