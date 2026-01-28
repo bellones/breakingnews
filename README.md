@@ -1,139 +1,185 @@
-# DWSDK Architecture
+# Backend API Calls by Screen
 
-## Overview
+This document lists **all backend API calls** made by the app, grouped by screen/flow. Use it to debug errors on the initial screen, router listing, personal details, and to verify why users might be sent back to the initial/login screen (e.g. auth/session handling).
 
-This document describes the internal architecture of the DWSDK: module layout, public API, data flow, and key design decisions.
+**Base URL** for all API calls below (except TestClient): `LinkConfiguration.apiUrl` → `https://{apiHost}/`
 
-## Module Layout
+- **Staging:** `https://api-gateway.staging.uplink.xyz/`
+- **Dev:** `https://api-gateway.develop.uplink.xyz/`
+- **Prod:** `https://api-gateway.uplink.xyz/`
 
+All these requests use the **same Dio client** (`ApiClient`) with the session interceptor (Bearer token) and Firebase App Check where noted.
+
+---
+
+## 1. Initial / Splash screen
+
+**Flow:** `SplashBloc` → connection check → permissions → **AutoLoginUseCase** (no direct API from splash except optional test).
+
+| API Call                       | Method | Path                             | When                                                                                          | Notes                                                                                                         |
+| ------------------------------ | ------ | -------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Verify token (credentials)** | GET    | `/v1/mobile/account/credentials` | After splash, when restoring session (AutoLoginUseCase → setAuthorizationToken → verifyToken) | If this fails (401 or invalid), user is treated as unauthenticated. **Critical for “initial screen” errors.** |
+
+**Optional (dev/test):** Splash can call a **separate test client** (base `http://192.168.30.236:3001/`) with App Check:
+
+- GET `/firebase/testApp` (with `X-Firebase-AppCheck` header) — see `splash_page.dart` `callApiWithDio()` (currently not awaited in main flow).
+
+**No other backend API calls are made on the splash screen itself.**  
+Errors on “initial screen” are likely from:
+
+1. **GET `/v1/mobile/account/credentials`** (verify token) failing or returning invalid.
+2. Redirect logic: if auth state becomes **expired** → user is sent to **Splash**. If **unauthorized** → user is sent to **Explorer (login)**.
+
+---
+
+## 2. Dashboard (first tab after login / “initial” home)
+
+**Flow:** `HomePage` → `DashboardCubit.init()` → `loadData()`.
+
+| API Call                  | Method | Path                                          | When                    | Notes                                                                                  |
+| ------------------------- | ------ | --------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------- |
+| **Network stats**         | GET    | `/v1/mobile/account/network-stats`            | Dashboard load          | Via `GetMyNetworksStatsUsecase`                                                        |
+| **Earning stats (KPI)**   | GET    | `/v1/mobile/account/kpi`                      | Dashboard load          | Via `GetEarningStatsUsecase`. Has try/catch and fallback to zeroes; can still rethrow. |
+| **Banners**               | GET    | `/v1/mobile/banners`                          | Dashboard load          | Via `GetBannersUsecase`                                                                |
+| **Surge areas (near me)** | GET    | `/v1/mobile/surge/near-to-me?lat=...&lng=...` | After location resolved | Via `GetSurgeAreasUsecase`; called after `getCurrentLocation()`                        |
+
+All four are triggered together on dashboard init; the first three are in `Future.wait`, then surge areas are loaded with location.  
+**Any 401 from these** is handled by `SessionInterceptor` → refresh requested → eventually can lead to **unauthorized** and redirect to login.
+
+---
+
+## 3. Registered routers (My Networks / Routers tab)
+
+**Flow:** `MyNetworksCubit.init()` → `GetRegisteredRoutersUseCase` → `RouterRepositoryImpl.getRegisteredRouters()` → **CommunityService.getRouters()**.
+
+| API Call                    | Method | Path                                                                                                               | When                                   | Notes                                                  |
+| --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------ |
+| **List registered routers** | GET    | `/v1/mobile/account/community-router?pageSize=100&page=1&filter[status][0]=registered&filter[status][1]=validated` | When opening My Networks / routers tab | **Main call for “listing registered routers” errors.** |
+
+Other router-related calls (same screen/flow):
+
+| API Call                          | Method | Path                                                                         | When                                                                  |
+| --------------------------------- | ------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Router details**                | GET    | `/v1/mobile/account/community-router/{id}`                                   | When opening a specific router (e.g. RouterDetailsPage)               |
+| **Is router registered (auth)**   | GET    | `/v1/mobile/account/community-router/verifyMacAddress?macAddress=...`        | When checking if current WiFi router is already registered            |
+| **Is router registered (public)** | GET    | `/v1/mobile/account/community-router/verifyMacAddress/public?macAddress=...` | Public check (e.g. when not logged in)                                |
+| **Register router**               | POST   | `/v1/mobile/account/community-router`                                        | Router registration (body: router payload); uses **requiresAppCheck** |
+| **Delete router**                 | DELETE | `/v1/mobile/account/community-router/{id}`                                   | Delete registered router                                              |
+
+---
+
+## 4. Personal details / Profile
+
+**In-app “Profile” screen (Account → Profile information):**  
+Opens a **WebView** to `LinkConfiguration.profileUrl`:
+
+- **Staging:** `https://portal.staging.uplink.xyz/account/details?tab=Details`
+- **Dev:** `https://portal.develop.uplink.xyz/account/details?tab=Details`
+- **Prod:** `https://portal.uplink.xyz/account/details?tab=Details`
+
+So **no direct app-to-backend API call** for that screen; the portal page in the WebView may call its own APIs.
+
+**App backend API that can be used for “personal details” (e.g. account data):**
+
+| API Call         | Method | Path                         | When                                              | Notes                                                                                                                                                                                                 |
+| ---------------- | ------ | ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **User profile** | GET    | `/v1/mobile/account/profile` | When code calls `AccountService.getUserProfile()` | Currently **not** used by ProfilePage (which uses WebView). Used only if some flow calls `AccountRepository.getUserProfile()`. **Worth checking backend** if “personal details” errors refer to this. |
+
+So “checking personal details” errors could be:
+
+1. **WebView** loading `profileUrl` (portal) or APIs called by that page.
+2. **GET `/v1/mobile/account/profile`** if any flow uses it (e.g. future or other screens).
+
+---
+
+## 5. Account / Post-login / Logout
+
+| API Call                             | Method | Path                                                    | When                                  | Notes                                                                   |
+| ------------------------------------ | ------ | ------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------- |
+| **Post-login (device registration)** | POST   | `/v1/mobile/account/device`                             | Right after auth becomes “authorized” | Body: `appId`, `notificationConfig`. Failures can affect session setup. |
+| **Notification config (get)**        | GET    | `/v1/mobile/account/device/{appId}/notification/config` | When reading notification settings    | `appId` from Firebase token (or `'none'`)                               |
+| **Notification config (put)**        | PUT    | `/v1/mobile/account/device/{appId}/notification/config` | When saving notification settings     | Same path as above                                                      |
+| **Pre-logout**                       | DELETE | `/v1/mobile/account/device/{appId}`                     | Before logout                         | Called in `AuthenticationBloc` before clearing session                  |
+
+---
+
+## 6. Auth and “back to initial screen”
+
+- **GET `/v1/mobile/account/credentials`** is used to **verify token** after restore (splash/auto-login) and when setting a new token (e.g. after web login).
+- **401** on any **ApiClient** request is handled by **SessionInterceptor** → `onRefreshTokenRequested()` → effectively triggers auth re-check. After that, if token is cleared or invalid:
+  - Auth state can become **unauthorized** → router redirects to **Explorer (login)**.
+  - If something ever sets **expired** (e.g. `setAuthorizationToken(..., expired: true)`), router redirects to **Splash** and shows “Session expired”.
+
+So “going back to initial screen” can be:
+
+- **Splash:** auth state **expired** (see `router_data.dart` → `_onSessionExpired`).
+- **Login (Explorer):** auth state **unauthorized** when visiting a route that `requiresAuth`.
+
+Relevant backend calls for that behavior:
+
+- **GET `/v1/mobile/account/credentials`** (verify token).
+- Any of the dashboard/router/account calls above returning **401**.
+
+---
+
+## 7. Other API calls (Explorer/Map, etc.)
+
+**Mobile (dashboard already listed):**
+
+- `/v1/mobile/account/network-stats` — dashboard
+- `/v1/mobile/account/kpi` — dashboard
+- `/v1/mobile/banners` — dashboard
+- `/v1/mobile/surge/near-to-me` — dashboard
+
+**Map service (Explorer tab / map flows):**
+
+- GET `/map/network-observation?ne=&sw=&heatmap=`
+- GET `/map/community-router?ne=&sw=&heatmap=&status=`
+- GET `/map/surge/?heatmap=&multiplierRange=`
+- POST `/map` (coverage/surge hexagon data)
+- GET `/search/location?query=&language=&country=&limit=`
+- GET `/map/pois/{h3Index}`
+- GET `/community-router/growth?days=&status=`
+- GET `/surge/{surgeId}`
+
+(Plus Mapbox geocoding is external: `https://api.mapbox.com/...`.)
+
+---
+
+## 8. Quick reference – paths only
+
+```text
+# Account / Auth (critical for initial and “back to initial”)
+GET  /v1/mobile/account/credentials
+GET  /v1/mobile/account/profile
+POST /v1/mobile/account/device
+GET  /v1/mobile/account/device/{appId}/notification/config
+PUT  /v1/mobile/account/device/{appId}/notification/config
+DELETE /v1/mobile/account/device/{appId}
+DELETE /v1/mobile/account/
+
+# Dashboard (first screen)
+GET  /v1/mobile/account/network-stats
+GET  /v1/mobile/account/kpi
+GET  /v1/mobile/banners
+GET  /v1/mobile/surge/near-to-me?lat=&lng=
+
+# Routers (listing and actions)
+GET  /v1/mobile/account/community-router?pageSize=&page=&filter[status][0]=...
+GET  /v1/mobile/account/community-router/{id}
+POST /v1/mobile/account/community-router  (App Check)
+DELETE /v1/mobile/account/community-router/{id}
+GET  /v1/mobile/account/community-router/verifyMacAddress?macAddress=
+GET  /v1/mobile/account/community-router/verifyMacAddress/public?macAddress=
 ```
-ios/DWSDK/
-├── DWSDK.h                 # Umbrella header (CocoaPods)
-├── Info.plist
-├── Core/
-│   ├── DWSDKCore.swift     # Singleton, init, present
-│   └── DWSDKConfig.swift   # Config model
-├── Models/
-│   ├── DWSDKModel.swift    # Base model
-│   └── CompanyCircleConfig.swift
-└── UI/
-    ├── DWSDKViewController.swift      # Base VC
-    ├── DWSDKModalViewController.swift # Modal container
-    ├── DataSavingsPlanOnboardingViewController.swift
-    ├── DataSavingsPlanFormViewController.swift
-    ├── DataSavingsPlanSummaryViewController.swift
-    ├── ApplicationSuccessViewController.swift
-    ├── FormStepViewController.swift
-    ├── Steps/              # Form step VCs
-    ├── Theme/               # Colors, typography, spacing
-    ├── Views/               # Reusable views
-    ├── Assets/              # Images
-    └── ViaCEPService.swift  # CEP lookup
-```
 
-## Public API Surface
+---
 
-### Entry Points
+## 9. Where to add debug logs
 
-- **DWSDKCore.shared**: Singleton access.
-- **DWSDKCore.shared.initialize(configuration:)**: Initialize SDK (thread-safe, idempotent).
-- **DWSDKCore.present(from:config:completion:)**: Present SDK modal from a given view controller with a config and optional completion.
+- **Splash / initial:** `AuthRepositoryImpl.setAuthorizationToken`, `AccountServiceImpl.verifyToken` (GET credentials), and router redirect in `RouterData._handleRedirect` (auth state: expired vs unauthorized).
+- **Dashboard:** `DashboardCubit.loadData` and the four use cases (network-stats, kpi, banners, surge/near-to-me).
+- **Routers:** `CommunityServiceImpl.getRouters` and `RouterRepositoryImpl.getRegisteredRouters`.
+- **Personal details:** If you add or use `getUserProfile()` in the app, log in `AccountServiceImpl.getUserProfile`; for the WebView, debug the portal URL and any failing requests in the WebView (e.g. via portal or backend logs).
 
-### Configuration
-
-- **DWSDKConfig(userName:theme:pendingCount:acceptedCount:rejectedCount:)**: Immutable config for presentation. All parameters optional except theme (default `.light`).
-
-### Theme and Styling
-
-- **DWSDKTheme**: Enum `.light`, `.dark`.
-- **DWSDKViewController.theme**: Settable on base and subclasses; drives colors and typography.
-- Theme colors, typography, and spacing are used internally; public usage is via `theme` and config.
-
-### Models
-
-- **DWSDKModel**: Base model with `identifier`, `createdAt`, `toDictionary()`.
-- **CompanyCircleConfig**: Company/circle configuration model.
-
-Other types (e.g. view controllers, custom views) are public where they need to be referenced or subclassed but are not part of the minimal “integrate and present” API.
-
-## Data Flow
-
-### Presentation Flow
-
-1. Host app obtains a `UIViewController` (e.g. root VC).
-2. Host creates `DWSDKConfig` with theme, optional userName, and counts.
-3. Host calls `DWSDKCore.shared.initialize()` if not already initialized.
-4. Host calls `DWSDKCore.present(from: viewController, config: config, completion: { ... })`.
-5. `DWSDKCore`:
-   - Dispatches to main queue.
-   - Checks that the view controller is not already presenting.
-   - Verifies SDK is initialized.
-   - Instantiates `DataSavingsPlanOnboardingViewController(config:)`.
-   - Wraps it in a `UINavigationController` (modal presentation style full screen).
-   - Presents the navigation controller and calls the completion handler.
-
-### Onboarding and Form Flow
-
-1. **DataSavingsPlanOnboardingViewController**: First screen (hero, benefits, “Apply now” CTA). On CTA, it pushes or presents **DataSavingsPlanFormViewController** (depending on navigation setup).
-2. **DataSavingsPlanFormViewController**: Holds a list of step view controllers and shared `formData`. It shows one step at a time, advances on “Continue”, and collects step data into `formData` via `collectStepData(from:)`.
-3. **Steps**: PersonalInfo, HomeAddress, PayoutMethod, ReviewConfirm, GoalSetting. Each step exposes fields and validation; form VC reads values and merges into `formData`.
-4. After the last step (Goal Setting), the form VC presents **DataSavingsPlanSummaryViewController** with the current `formData`.
-5. Summary screen shows editable cards; “Edit” returns to the corresponding step; “Looks good” proceeds to terms/success.
-6. **ApplicationSuccessViewController**: Shown after successful submission; “Return to home” dismisses and the host’s completion block can run.
-
-### Form Data and Step Collection
-
-- **formData**: Dictionary maintained by `DataSavingsPlanFormViewController`; keys include `firstName`, `lastName`, `cpf`, `pixKey`, `street`, `cep`, `selectedCategories`, `selectedGoal`, `prefersNotToMonetize`, etc.
-- **collectStepData(from:)**: Called when leaving a step or when returning from summary to refresh; each step type knows how to read its own UI and write into the shared `formData`.
-- Summary and success screens read from `formData` or from a config/data passed by the form VC.
-
-## Key Design Decisions
-
-### Singleton and Initialization
-
-- **DWSDKCore** is a singleton so that initialization and “present” entry point are global and easy to use from any host (e.g. React Native bridge).
-- Initialization is locked and idempotent so that multiple calls (e.g. from JS) do not cause issues.
-
-### Modal-Only Presentation
-
-- The SDK is always presented as a full-screen modal. The host does not embed SDK view controllers in its own navigation; the SDK brings its own `UINavigationController` and flow.
-
-### Theme and Styling
-
-- **DWSDKTheme** is the single public theme switch; **DWSDKThemeColors**, **DWSDKTypography**, and **DWSDKSpacing** centralize look and feel so that all screens and components stay consistent and can react to theme changes.
-
-### Objective-C Compatibility
-
-- Core types used from the bridge or from Objective-C are annotated with `@objc` and, where needed, inherit from `NSObject`. This allows React Native and legacy Objective-C apps to use the SDK without a Swift-only dependency at the call site.
-
-### Bundle and Resources
-
-- Images and fonts are loaded from the DWSDK resource bundle when available, with fallback to the main bundle so that the SDK works both when embedded as a pod and in development setups.
-- **Bundle(for: DWSDKCore.self)** (or equivalent) is used to locate the framework bundle and its resources.
-
-### Validation and Errors
-
-- Form steps validate input and expose validation state; the form VC enables “Continue” only when the current step is valid.
-- Presentation and bridge errors are communicated via completion handlers and Promise rejections (e.g. root VC not found, init failed, present failed) with clear error codes and messages.
-
-## Dependencies
-
-- **System**: Foundation, UIKit. No third-party Swift or Obj-C dependencies.
-- **ViaCEP**: Used for Brazilian CEP (postal code) lookup; network calls are self-contained in **ViaCEPService** (e.g. Result-based API).
-
-## Security and Privacy
-
-- Sensitive fields (e.g. CPF, account numbers) are masked in summary and logs where applicable.
-- No credentials or tokens are stored by the SDK; form data is held in memory for the duration of the flow.
-
-## Testing and Debugging
-
-- **DWSDKCore.reset()** is available in DEBUG to clear initialization state for tests.
-- Bridge and presentation paths can be tested by invoking `openDWSDK` from the Chase Mock App and verifying modal presentation and dismissal.
-
-## Related Documentation
-
-- [SDK_OVERVIEW.md](./SDK_OVERVIEW.md) – High-level overview and usage.
-- [SWIFT_PACKAGE.md](./SWIFT_PACKAGE.md) – Swift Package layout and build.
-- [SPM_VS_COCOAPODS.md](./SPM_VS_COCOAPODS.md) – Distribution and dependency manager comparison.
-- [REACT_NATIVE_INTEGRATION.md](./REACT_NATIVE_INTEGRATION.md) – How the Chase Mock App imports and uses the library.
+This gives the backend team a full list of API calls for those screens and clarifies what to check when users see errors or are sent back to the initial screen.
