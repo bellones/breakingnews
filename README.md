@@ -1,167 +1,139 @@
-# React Native Integration with Chase Mock App
+# DWSDK Architecture
 
 ## Overview
 
-This document explains how the DWSDK library is integrated with the Chase Mock App (a React Native application). It covers the bridge architecture, CocoaPods setup, configuration flow, and end-to-end data flow from JavaScript to native SDK presentation.
+This document describes the internal architecture of the DWSDK: module layout, public API, data flow, and key design decisions.
 
-## Architecture Overview
-
-The integration follows this flow:
-
-1. **JavaScript** calls `openDWSDK(options)` from the TypeScript wrapper
-2. **TypeScript** validates options, applies defaults (e.g. theme from system), and calls the native module
-3. **Native module** (`DWSDKModule`) receives the call, parses options into `DWSDKConfig`, finds the root view controller, initializes the SDK if needed, and calls `DWSDKCore.present(from:config:completion:)`
-4. **DWSDKCore** presents the SDK modal (Data Savings Plan onboarding) and invokes the completion handler
-5. **Promise** resolves or rejects back to JavaScript
-
-## Repository and Path Layout
+## Module Layout
 
 ```
-dwallet.mobile-sdk/
-├── ios/                    # DWSDK framework (CocoaPods source)
-│   ├── DWSDK.podspec
-│   ├── DWSDK/
-│   ├── Package.swift
-│   ├── DWSDKModule.m       # Reference implementation
-│   └── DWSDKModule.swift   # Reference implementation
-├── apps/
-│   └── mock-chase/         # React Native app
-│       ├── ios/
-│       │   ├── Podfile     # References DWSDK via path
-│       │   ├── DWSDKModule.m
-│       │   └── DWSDKModule.swift
-│       └── src/
-├── DWSDK.ts                # TypeScript/JS API
-├── index.ts
-└── package.json
+ios/DWSDK/
+├── DWSDK.h                 # Umbrella header (CocoaPods)
+├── Info.plist
+├── Core/
+│   ├── DWSDKCore.swift     # Singleton, init, present
+│   └── DWSDKConfig.swift   # Config model
+├── Models/
+│   ├── DWSDKModel.swift    # Base model
+│   └── CompanyCircleConfig.swift
+└── UI/
+    ├── DWSDKViewController.swift      # Base VC
+    ├── DWSDKModalViewController.swift # Modal container
+    ├── DataSavingsPlanOnboardingViewController.swift
+    ├── DataSavingsPlanFormViewController.swift
+    ├── DataSavingsPlanSummaryViewController.swift
+    ├── ApplicationSuccessViewController.swift
+    ├── FormStepViewController.swift
+    ├── Steps/              # Form step VCs
+    ├── Theme/               # Colors, typography, spacing
+    ├── Views/               # Reusable views
+    ├── Assets/              # Images
+    └── ViaCEPService.swift  # CEP lookup
 ```
 
-The Chase Mock App lives under `apps/mock-chase/`. The native iOS app pulls in DWSDK via CocoaPods using a **local path** to the repo’s `ios/` directory.
+## Public API Surface
 
-## How the Library Is Imported (CocoaPods)
+### Entry Points
 
-### Podfile Configuration
+- **DWSDKCore.shared**: Singleton access.
+- **DWSDKCore.shared.initialize(configuration:)**: Initialize SDK (thread-safe, idempotent).
+- **DWSDKCore.present(from:config:completion:)**: Present SDK modal from a given view controller with a config and optional completion.
 
-In the Chase Mock App, the Podfile is at `apps/mock-chase/ios/Podfile`:
+### Configuration
 
-```ruby
-platform :ios, '13.0'
-# ...
+- **DWSDKConfig(userName:theme:pendingCount:acceptedCount:rejectedCount:)**: Immutable config for presentation. All parameters optional except theme (default `.light`).
 
-target 'MockChase' do
-  config = use_native_modules!
-  use_react_native!(...)
+### Theme and Styling
 
-  # DWSDK Framework - using local path
-  pod 'DWSDK', :path => '../../../ios'
-  # ...
-end
-```
+- **DWSDKTheme**: Enum `.light`, `.dark`.
+- **DWSDKViewController.theme**: Settable on base and subclasses; drives colors and typography.
+- Theme colors, typography, and spacing are used internally; public usage is via `theme` and config.
 
-**Important details:**
+### Models
 
-- **Path**: `:path => '../../../ios'` is relative to the Podfile’s directory (`apps/mock-chase/ios/`), so it points to the repo root’s `ios/` folder (where `DWSDK.podspec` and the `DWSDK/` source live).
-- CocoaPods uses that path to find `DWSDK.podspec` and build the DWSDK target; the built product is linked into the MockChase app target.
-- After `pod install`, you must open **MockChase.xcworkspace** (not the `.xcodeproj`).
+- **DWSDKModel**: Base model with `identifier`, `createdAt`, `toDictionary()`.
+- **CompanyCircleConfig**: Company/circle configuration model.
 
-### Installation Steps
+Other types (e.g. view controllers, custom views) are public where they need to be referenced or subclassed but are not part of the minimal “integrate and present” API.
 
-1. From repo root, install JS dependencies:
-   ```bash
-   npm install
-   ```
-2. Install iOS pods:
-   ```bash
-   cd apps/mock-chase/ios
-   pod install
-   ```
-3. Open the workspace:
-   ```bash
-   open MockChase.xcworkspace
-   ```
+## Data Flow
 
-## React Native Bridge Module
+### Presentation Flow
 
-The bridge consists of **Objective-C registration** and **Swift implementation**. Both live in the **app** project (`apps/mock-chase/ios/`). The pod provides the `DWSDK` framework; the app provides the bridge that uses it.
+1. Host app obtains a `UIViewController` (e.g. root VC).
+2. Host creates `DWSDKConfig` with theme, optional userName, and counts.
+3. Host calls `DWSDKCore.shared.initialize()` if not already initialized.
+4. Host calls `DWSDKCore.present(from: viewController, config: config, completion: { ... })`.
+5. `DWSDKCore`:
+   - Dispatches to main queue.
+   - Checks that the view controller is not already presenting.
+   - Verifies SDK is initialized.
+   - Instantiates `DataSavingsPlanOnboardingViewController(config:)`.
+   - Wraps it in a `UINavigationController` (modal presentation style full screen).
+   - Presents the navigation controller and calls the completion handler.
 
-### 1. Objective-C Registration (`DWSDKModule.m`)
+### Onboarding and Form Flow
 
-Location: `apps/mock-chase/ios/DWSDKModule.m`
+1. **DataSavingsPlanOnboardingViewController**: First screen (hero, benefits, “Apply now” CTA). On CTA, it pushes or presents **DataSavingsPlanFormViewController** (depending on navigation setup).
+2. **DataSavingsPlanFormViewController**: Holds a list of step view controllers and shared `formData`. It shows one step at a time, advances on “Continue”, and collects step data into `formData` via `collectStepData(from:)`.
+3. **Steps**: PersonalInfo, HomeAddress, PayoutMethod, ReviewConfirm, GoalSetting. Each step exposes fields and validation; form VC reads values and merges into `formData`.
+4. After the last step (Goal Setting), the form VC presents **DataSavingsPlanSummaryViewController** with the current `formData`.
+5. Summary screen shows editable cards; “Edit” returns to the corresponding step; “Looks good” proceeds to terms/success.
+6. **ApplicationSuccessViewController**: Shown after successful submission; “Return to home” dismisses and the host’s completion block can run.
 
-Registers the native module and declares the method JavaScript can call:
+### Form Data and Step Collection
 
-```objc
-#import <React/RCTBridgeModule.h>
+- **formData**: Dictionary maintained by `DataSavingsPlanFormViewController`; keys include `firstName`, `lastName`, `cpf`, `pixKey`, `street`, `cep`, `selectedCategories`, `selectedGoal`, `prefersNotToMonetize`, etc.
+- **collectStepData(from:)**: Called when leaving a step or when returning from summary to refresh; each step type knows how to read its own UI and write into the shared `formData`.
+- Summary and success screens read from `formData` or from a config/data passed by the form VC.
 
-@interface RCT_EXTERN_MODULE(DWSDKModule, NSObject)
+## Key Design Decisions
 
-RCT_EXTERN_METHOD(openDWSDKFlow:(NSDictionary *)options
-                  resolver:(RCTPromiseResolveBlock)resolver
-                  rejecter:(RCTPromiseRejectBlock)rejecter)
+### Singleton and Initialization
 
-@end
-```
+- **DWSDKCore** is a singleton so that initialization and “present” entry point are global and easy to use from any host (e.g. React Native bridge).
+- Initialization is locked and idempotent so that multiple calls (e.g. from JS) do not cause issues.
 
-- `RCT_EXTERN_MODULE(DWSDKModule, NSObject)` exposes the Swift class as `"DWSDKModule"`.
-- `RCT_EXTERN_METHOD(openDWSDKFlow:...)` exposes the Promise-based method.
+### Modal-Only Presentation
 
-### 2. Swift Implementation (`DWSDKModule.swift`)
+- The SDK is always presented as a full-screen modal. The host does not embed SDK view controllers in its own navigation; the SDK brings its own `UINavigationController` and flow.
 
-Location: `apps/mock-chase/ios/DWSDKModule.swift`
+### Theme and Styling
 
-The Swift class conforms to `RCTBridgeModule` and implements `openDWSDKFlow`:
+- **DWSDKTheme** is the single public theme switch; **DWSDKThemeColors**, **DWSDKTypography**, and **DWSDKSpacing** centralize look and feel so that all screens and components stay consistent and can react to theme changes.
 
-- **Parse options**: Builds a `DWSDKConfig` from the `options` dictionary (theme, userName, pendingCount, acceptedCount, rejectedCount).
-- **Root view controller**: Finds the current key window’s root view controller.
-- **Initialize SDK**: If needed, calls `DWSDKCore.shared.initialize()`.
-- **Present**: Calls `DWSDKCore.present(from: rootViewController, config: config, completion: { success in ... })`.
-- **Promise**: Calls `resolver(["success": true])` or `rejecter(...)`.
+### Objective-C Compatibility
 
-All work is done on the main queue.
+- Core types used from the bridge or from Objective-C are annotated with `@objc` and, where needed, inherit from `NSObject`. This allows React Native and legacy Objective-C apps to use the SDK without a Swift-only dependency at the call site.
 
-### 3. TypeScript/JavaScript API (`DWSDK.ts`)
+### Bundle and Resources
 
-Location: `dwallet.mobile-sdk/DWSDK.ts`
+- Images and fonts are loaded from the DWSDK resource bundle when available, with fallback to the main bundle so that the SDK works both when embedded as a pod and in development setups.
+- **Bundle(for: DWSDKCore.self)** (or equivalent) is used to locate the framework bundle and its resources.
 
-- **Theme**: If not provided, uses system color scheme.
-- **Options**: Maps `OpenDWSDKOptions` to the dictionary expected by the native module.
-- **Validation**: Ensures counts are non-negative integers.
-- **Native call**: `NativeModules.DWSDKModule.openDWSDKFlow(options, resolver, rejecter)` and returns a Promise.
+### Validation and Errors
 
-## Configuration Flow (Options to DWSDKConfig)
+- Form steps validate input and expose validation state; the form VC enables “Continue” only when the current step is valid.
+- Presentation and bridge errors are communicated via completion handlers and Promise rejections (e.g. root VC not found, init failed, present failed) with clear error codes and messages.
 
-1. **JS/TS**: App calls `openDWSDK({ theme, userName, pendingCount, acceptedCount, rejectedCount })`.
-2. **TS**: Applies defaults, validates, then calls `DWSDKModule.openDWSDKFlow(nativeOptions, resolver, rejecter)`.
-3. **Swift**: `parseOptions(_ options:)` maps dictionary to `DWSDKTheme`, optional userName, and counts (default 0, validated >= 0).
-4. **Swift**: Creates `DWSDKConfig(...)` and passes it to `DWSDKCore.present(from:config:completion:)`.
+## Dependencies
 
-## How the Chase Mock App Uses the SDK
+- **System**: Foundation, UIKit. No third-party Swift or Obj-C dependencies.
+- **ViaCEP**: Used for Brazilian CEP (postal code) lookup; network calls are self-contained in **ViaCEPService** (e.g. Result-based API).
 
-### Home screen (`home.tsx`)
+## Security and Privacy
 
-- Imports `openDWSDK` from `@drumwave/dwsdk-react-native`.
-- Passes options (e.g. userName, theme, mock counts).
-- On button press, calls `await openDWSDK({ ... })` and handles success/error.
+- Sensitive fields (e.g. CPF, account numbers) are masked in summary and logs where applicable.
+- No credentials or tokens are stored by the SDK; form data is held in memory for the duration of the flow.
 
-### Data Savings Plan banner (`DataSavingsPlanBanner.tsx`)
+## Testing and Debugging
 
-- Renders a banner; button opens the SDK.
-- Calls `openDWSDK({ theme: bannerTheme })` (and optionally other options).
-- Handles loading and errors.
+- **DWSDKCore.reset()** is available in DEBUG to clear initialization state for tests.
+- Bridge and presentation paths can be tested by invoking `openDWSDK` from the Chase Mock App and verifying modal presentation and dismissal.
 
-In both cases: **user action** → **openDWSDK()** → **DWSDKModule.openDWSDKFlow** → **DWSDKCore.present** → **native full-screen SDK UI**.
+## Related Documentation
 
-## Summary: How the Library Works and Is Imported
-
-- **Native**: DWSDK is imported into the Chase Mock App as a **CocoaPods pod** from the local path `../../../ios`. The app links against the pod and uses `DWSDKCore` and `DWSDKConfig`.
-- **Bridge**: The **React Native bridge** is in the **app** (`DWSDKModule.m` + `DWSDKModule.swift`), which imports the `DWSDK` module and uses it to initialize and present the SDK with a config from JS options.
-- **JS**: The app imports `openDWSDK` from the dwallet.mobile-sdk package; that API calls `NativeModules.DWSDKModule.openDWSDKFlow` and triggers the native flow.
-
-## Troubleshooting
-
-- **"DWSDKModule is not available"**: Ensure `DWSDKModule.m` and `DWSDKModule.swift` are in the app target and you opened `.xcworkspace` after `pod install`.
-- **"Could not find root view controller"**: Ensure the app has a visible window and root view controller when `openDWSDKFlow` runs.
-- **Pod not found**: From `apps/mock-chase/ios`, `../../../ios` must point to the folder containing `DWSDK.podspec` and `DWSDK/`.
-- **Theme or counts not applied**: Check that JS options match what `parseOptions` expects (theme string, numeric counts).
-
-See also: [SDK_OVERVIEW.md](./SDK_OVERVIEW.md), [ARCHITECTURE.md](./ARCHITECTURE.md), [SPM_VS_COCOAPODS.md](./SPM_VS_COCOAPODS.md).
+- [SDK_OVERVIEW.md](./SDK_OVERVIEW.md) – High-level overview and usage.
+- [SWIFT_PACKAGE.md](./SWIFT_PACKAGE.md) – Swift Package layout and build.
+- [SPM_VS_COCOAPODS.md](./SPM_VS_COCOAPODS.md) – Distribution and dependency manager comparison.
+- [REACT_NATIVE_INTEGRATION.md](./REACT_NATIVE_INTEGRATION.md) – How the Chase Mock App imports and uses the library.
