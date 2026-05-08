@@ -1,185 +1,89 @@
-# Backend API Calls by Screen
+# Report: Firebase Apple SDK and CocoaPods sunset — impact on Valet Mate Parker (React Native)
 
-This document lists **all backend API calls** made by the app, grouped by screen/flow. Use it to debug errors on the initial screen, router listing, personal details, and to verify why users might be sent back to the initial/login screen (e.g. auth/session handling).
+## Executive summary
 
-**Base URL** for all API calls below (except TestClient): `LinkConfiguration.apiUrl` → `https://{apiHost}/`
+Firebase will **stop publishing new versions of the Apple (iOS) SDK on CocoaPods after October 2026**. Older CocoaPods releases stay available, but **you stop getting new native iOS Firebase releases** if you stay on CocoaPods-only integration.
 
-- **Staging:** `https://api-gateway.staging.uplink.xyz/`
-- **Dev:** `https://api-gateway.develop.uplink.xyz/`
-- **Prod:** `https://api-gateway.uplink.xyz/`
+This app **does integrate the Firebase Apple SDK through CocoaPods** today (via an explicit `Podfile` and **React Native Firebase**). So the announcement **applies to the iOS side** of this project. It does **not** change **Android** Gradle-based Firebase setup.
 
-All these requests use the **same Dio client** (`ApiClient`) with the session interceptor (Bearer token) and Firebase App Check where noted.
+The **“uplink-chain-stg / uplink-chain-dev / uplink-chain”** names in the email are **Firebase/Google Cloud project identifiers** in the console; they may or may not match this repo’s name. **Compliance is per app / per iOS integration**, not per git repo label.
 
 ---
 
-## 1. Initial / Splash screen
+## Current state in this codebase
 
-**Flow:** `SplashBloc` → connection check → permissions → **AutoLoginUseCase** (no direct API from splash except optional test).
+1. **JavaScript layer**  
+   - Uses **`@react-native-firebase/app`**, **analytics**, **crashlytics**, and **messaging** (v20.3.0 in `package.json`).
 
-| API Call                       | Method | Path                             | When                                                                                          | Notes                                                                                                         |
-| ------------------------------ | ------ | -------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **Verify token (credentials)** | GET    | `/v1/mobile/account/credentials` | After splash, when restoring session (AutoLoginUseCase → setAuthorizationToken → verifyToken) | If this fails (401 or invalid), user is treated as unauthenticated. **Critical for “initial screen” errors.** |
+2. **iOS native layer**  
+   - **`ios/Podfile`** declares **CocoaPods** dependencies, including:
+     - `Firebase`, `FirebaseCore`, `GoogleUtilities` (with modular headers).
+   - **`ios/Podfile.lock`** resolves the **Firebase Apple SDK** (e.g. **10.29.0**) and related pods (**FirebaseAnalytics**, **FirebaseCrashlytics**, **FirebaseMessaging**, etc.).
 
-**Optional (dev/test):** Splash can call a **separate test client** (base `http://192.168.30.236:3001/`) with App Check:
+3. **Swift bootstrap**  
+   - `AppDelegate.swift` imports **`Firebase`** and calls **`FirebaseApp.configure()`**.
 
-- GET `/firebase/testApp` (with `X-Firebase-AppCheck` header) — see `splash_page.dart` `callApiWithDio()` (currently not awaited in main flow).
+4. **SPM**  
+   - There is **no** root `Package.swift` for app dependencies; iOS Firebase today is **CocoaPods-driven**.
 
-**No other backend API calls are made on the splash screen itself.**  
-Errors on “initial screen” are likely from:
-
-1. **GET `/v1/mobile/account/credentials`** (verify token) failing or returning invalid.
-2. Redirect logic: if auth state becomes **expired** → user is sent to **Splash**. If **unauthorized** → user is sent to **Explorer (login)**.
-
----
-
-## 2. Dashboard (first tab after login / “initial” home)
-
-**Flow:** `HomePage` → `DashboardCubit.init()` → `loadData()`.
-
-| API Call                  | Method | Path                                          | When                    | Notes                                                                                  |
-| ------------------------- | ------ | --------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------- |
-| **Network stats**         | GET    | `/v1/mobile/account/network-stats`            | Dashboard load          | Via `GetMyNetworksStatsUsecase`                                                        |
-| **Earning stats (KPI)**   | GET    | `/v1/mobile/account/kpi`                      | Dashboard load          | Via `GetEarningStatsUsecase`. Has try/catch and fallback to zeroes; can still rethrow. |
-| **Banners**               | GET    | `/v1/mobile/banners`                          | Dashboard load          | Via `GetBannersUsecase`                                                                |
-| **Surge areas (near me)** | GET    | `/v1/mobile/surge/near-to-me?lat=...&lng=...` | After location resolved | Via `GetSurgeAreasUsecase`; called after `getCurrentLocation()`                        |
-
-All four are triggered together on dashboard init; the first three are in `Future.wait`, then surge areas are loaded with location.  
-**Any 401 from these** is handled by `SessionInterceptor` → refresh requested → eventually can lead to **unauthorized** and redirect to login.
+**Conclusion:** This app is in the category **“Apple platform project using Firebase Apple SDK via CocoaPods”** for iOS. The email’s carve-out for “if you’re not using CocoaPods” **does not apply** to your iOS build.
 
 ---
 
-## 3. Registered routers (My Networks / Routers tab)
+## Impact (by timeline)
 
-**Flow:** `MyNetworksCubit.init()` → `GetRegisteredRoutersUseCase` → `RouterRepositoryImpl.getRegisteredRouters()` → **CommunityService.getRouters()**.
+| Period | Effect on this app |
+|--------|-------------------|
+| **From ~May 2026** | Possible **deprecation warnings** during `pod install` / `pod update`. **Builds should still work.** |
+| **After October 2026** | **No new Firebase Apple SDK versions** published to CocoaPods. Staying on CocoaPods means **no new native iOS Firebase features, fixes, or security updates** through pod version bumps. |
+| **December 2026 (registry read-only)** | Broader CocoaPods ecosystem change; **existing** Firebase pod specs that were already published **remain** usable for installs that don’t need unpublished updates — but **Firebase’s policy** is the limiting factor for *new* SDK releases, not only the registry. |
 
-| API Call                    | Method | Path                                                                                                               | When                                   | Notes                                                  |
-| --------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------ |
-| **List registered routers** | GET    | `/v1/mobile/account/community-router?pageSize=100&page=1&filter[status][0]=registered&filter[status][1]=validated` | When opening My Networks / routers tab | **Main call for “listing registered routers” errors.** |
-
-Other router-related calls (same screen/flow):
-
-| API Call                          | Method | Path                                                                         | When                                                                  |
-| --------------------------------- | ------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Router details**                | GET    | `/v1/mobile/account/community-router/{id}`                                   | When opening a specific router (e.g. RouterDetailsPage)               |
-| **Is router registered (auth)**   | GET    | `/v1/mobile/account/community-router/verifyMacAddress?macAddress=...`        | When checking if current WiFi router is already registered            |
-| **Is router registered (public)** | GET    | `/v1/mobile/account/community-router/verifyMacAddress/public?macAddress=...` | Public check (e.g. when not logged in)                                |
-| **Register router**               | POST   | `/v1/mobile/account/community-router`                                        | Router registration (body: router payload); uses **requiresAppCheck** |
-| **Delete router**                 | DELETE | `/v1/mobile/account/community-router/{id}`                                   | Delete registered router                                              |
+**Android:** Unaffected by this **CocoaPods** decision; your **`google-services.json`**, Crashlytics Gradle plugin, etc. continue on the Android path unless Google announces separate changes.
 
 ---
 
-## 4. Personal details / Profile
+## What you need to do to stay aligned
 
-**In-app “Profile” screen (Account → Profile information):**  
-Opens a **WebView** to `LinkConfiguration.profileUrl`:
+1. **Treat this as an iOS delivery / dependency strategy project (before October 2026).**  
+   Goal: ensure future **native** Firebase updates reach the app **without** relying on new CocoaPods drops.
 
-- **Staging:** `https://portal.staging.uplink.xyz/account/details?tab=Details`
-- **Dev:** `https://portal.develop.uplink.xyz/account/details?tab=Details`
-- **Prod:** `https://portal.uplink.xyz/account/details?tab=Details`
+2. **Follow upstream guidance in order of ownership:**  
+   - **Firebase:** official migration to **Swift Package Manager** or **manual** install of the Apple SDK.  
+   - **React Native Firebase:** how `@react-native-firebase/*` will consume Firebase on iOS once CocoaPods is no longer the shipping channel for new SDK versions (their docs/changelog/issues are the source of truth for RN-specific steps).
 
-So **no direct app-to-backend API call** for that screen; the portal page in the WebView may call its own APIs.
+3. **Plan realistically for React Native**  
+   Migration is not only “add SPM in Xcode”; it must remain compatible with **React Native’s** pod integration and **RNFirebase’s** native modules. Typically you will:  
+   - Upgrade **React Native Firebase** (and React Native) to versions that support the **supported** Firebase install method;  
+   - Adjust **iOS** integration (Pods vs SPM / hybrid) per those versions’ docs;  
+   - Re-verify **Analytics, Crashlytics, Messaging**, and **`AppDelegate`** / **push** setup after the change.
 
-**App backend API that can be used for “personal details” (e.g. account data):**
+4. **Operational housekeeping**  
+   - Map which **Firebase console projects** (`uplink-chain-*` vs others) own **this** app’s `GoogleService-Info.plist` / bundle ID — so owners know which commercial “projects” must be migrated in lockstep.  
+   - CI: expect **noisy but non-fatal** pod warnings from May 2026 until you migrate.
 
-| API Call         | Method | Path                         | When                                              | Notes                                                                                                                                                                                                 |
-| ---------------- | ------ | ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **User profile** | GET    | `/v1/mobile/account/profile` | When code calls `AccountService.getUserProfile()` | Currently **not** used by ProfilePage (which uses WebView). Used only if some flow calls `AccountRepository.getUserProfile()`. **Worth checking backend** if “personal details” errors refer to this. |
-
-So “checking personal details” errors could be:
-
-1. **WebView** loading `profileUrl` (portal) or APIs called by that page.
-2. **GET `/v1/mobile/account/profile`** if any flow uses it (e.g. future or other screens).
-
----
-
-## 5. Account / Post-login / Logout
-
-| API Call                             | Method | Path                                                    | When                                  | Notes                                                                   |
-| ------------------------------------ | ------ | ------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------- |
-| **Post-login (device registration)** | POST   | `/v1/mobile/account/device`                             | Right after auth becomes “authorized” | Body: `appId`, `notificationConfig`. Failures can affect session setup. |
-| **Notification config (get)**        | GET    | `/v1/mobile/account/device/{appId}/notification/config` | When reading notification settings    | `appId` from Firebase token (or `'none'`)                               |
-| **Notification config (put)**        | PUT    | `/v1/mobile/account/device/{appId}/notification/config` | When saving notification settings     | Same path as above                                                      |
-| **Pre-logout**                       | DELETE | `/v1/mobile/account/device/{appId}`                     | Before logout                         | Called in `AuthenticationBloc` before clearing session                  |
+5. **If you stay on CocoaPods past October 2026 without migrating**  
+   The app **can still build** using **already-published** pods, but **you accept stagnation and risk** on the native Firebase stack (bugs, Apple OS changes, future compliance).
 
 ---
 
-## 6. Auth and “back to initial screen”
+## Summary
 
-- **GET `/v1/mobile/account/credentials`** is used to **verify token** after restore (splash/auto-login) and when setting a new token (e.g. after web login).
-- **401** on any **ApiClient** request is handled by **SessionInterceptor** → `onRefreshTokenRequested()` → effectively triggers auth re-check. After that, if token is cleared or invalid:
-  - Auth state can become **unauthorized** → router redirects to **Explorer (login)**.
-  - If something ever sets **expired** (e.g. `setAuthorizationToken(..., expired: true)`), router redirects to **Splash** and shows “Session expired”.
-
-So “going back to initial screen” can be:
-
-- **Splash:** auth state **expired** (see `router_data.dart` → `_onSessionExpired`).
-- **Login (Explorer):** auth state **unauthorized** when visiting a route that `requiresAuth`.
-
-Relevant backend calls for that behavior:
-
-- **GET `/v1/mobile/account/credentials`** (verify token).
-- Any of the dashboard/router/account calls above returning **401**.
+| Topic | Detail |
+|-------|--------|
+| **Impact** | **High for long-term iOS maintainability**, **low for immediate breakage**. |
+| **iOS** | Stack **today depends on Firebase via CocoaPods**; migrating **before October 2026** is required for **ongoing Firebase Apple SDK updates**. |
+| **Action** | Plan an **iOS migration path** coordinated with **`@react-native-firebase`** releases and Firebase’s migration guide. |
+| **Android** | **Not** impacted by this specific CocoaPods change. |
 
 ---
 
-## 7. Other API calls (Explorer/Map, etc.)
+## Reference: original communication (high level)
 
-**Mobile (dashboard already listed):**
-
-- `/v1/mobile/account/network-stats` — dashboard
-- `/v1/mobile/account/kpi` — dashboard
-- `/v1/mobile/banners` — dashboard
-- `/v1/mobile/surge/near-to-me` — dashboard
-
-**Map service (Explorer tab / map flows):**
-
-- GET `/map/network-observation?ne=&sw=&heatmap=`
-- GET `/map/community-router?ne=&sw=&heatmap=&status=`
-- GET `/map/surge/?heatmap=&multiplierRange=`
-- POST `/map` (coverage/surge hexagon data)
-- GET `/search/location?query=&language=&country=&limit=`
-- GET `/map/pois/{h3Index}`
-- GET `/community-router/growth?days=&status=`
-- GET `/surge/{surgeId}`
-
-(Plus Mapbox geocoding is external: `https://api.mapbox.com/...`.)
+- **May 2026 onward:** Possible deprecation warnings on `pod install` / `pod update` (non-breaking).
+- **October 2026:** Firebase stops publishing **new** versions to CocoaPods.
+- **December 2, 2026:** Public CocoaPods registry moves to **read-only** mode.
+- **Action:** Migrate Apple projects using Firebase Apple SDK via CocoaPods to **Swift Package Manager** or **manual installation**.
 
 ---
 
-## 8. Quick reference – paths only
-
-```text
-# Account / Auth (critical for initial and “back to initial”)
-GET  /v1/mobile/account/credentials
-GET  /v1/mobile/account/profile
-POST /v1/mobile/account/device
-GET  /v1/mobile/account/device/{appId}/notification/config
-PUT  /v1/mobile/account/device/{appId}/notification/config
-DELETE /v1/mobile/account/device/{appId}
-DELETE /v1/mobile/account/
-
-# Dashboard (first screen)
-GET  /v1/mobile/account/network-stats
-GET  /v1/mobile/account/kpi
-GET  /v1/mobile/banners
-GET  /v1/mobile/surge/near-to-me?lat=&lng=
-
-# Routers (listing and actions)
-GET  /v1/mobile/account/community-router?pageSize=&page=&filter[status][0]=...
-GET  /v1/mobile/account/community-router/{id}
-POST /v1/mobile/account/community-router  (App Check)
-DELETE /v1/mobile/account/community-router/{id}
-GET  /v1/mobile/account/community-router/verifyMacAddress?macAddress=
-GET  /v1/mobile/account/community-router/verifyMacAddress/public?macAddress=
-```
-
----
-
-## 9. Where to add debug logs
-
-- **Splash / initial:** `AuthRepositoryImpl.setAuthorizationToken`, `AccountServiceImpl.verifyToken` (GET credentials), and router redirect in `RouterData._handleRedirect` (auth state: expired vs unauthorized).
-- **Dashboard:** `DashboardCubit.loadData` and the four use cases (network-stats, kpi, banners, surge/near-to-me).
-- **Routers:** `CommunityServiceImpl.getRouters` and `RouterRepositoryImpl.getRegisteredRouters`.
-- **Personal details:** If you add or use `getUserProfile()` in the app, log in `AccountServiceImpl.getUserProfile`; for the WebView, debug the portal URL and any failing requests in the WebView (e.g. via portal or backend logs).
-
-This gives the backend team a full list of API calls for those screens and clarifies what to check when users see errors or are sent back to the initial screen.
+*Generated for repository: `valet-mate-parker`. Content reflects codebase state at time of writing (`ios/Podfile`, `ios/Podfile.lock`, `package.json`, `AppDelegate.swift`).*
