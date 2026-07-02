@@ -1,68 +1,100 @@
-## Summary
+## Title
 
-Personal join flow (multi-DSP / DWLLT-2512) fails when `POST /api/bff/personal/join-dsp` PATCHes a source DSA that has no linked currency. The DSP API returns HTTP 500:
+PdW | Contribution settings | Dedicated opt-out layout when disabling non-contributing categories
 
-```text
-Account {dsaId} has no associated currency
-```
+## Type
 
-Example DSA: `22a1ace2-3099-4e9c-b1be-84f0d823cf39`
+Story / UI Enhancement
 
----
+## User Story
 
-## Steps to reproduce
+As a Personal dWallet user with multiple DSP plans,  
+I want a clear layout when I choose to stop contributing categories,  
+so I understand which categories will be deactivated and the impact before saving.
 
-1. Sign in to Personal dWallet in DEV with a user who has an existing DSA created without a linked currency.
-2. Start join flow: `/plans/{cdspId}` → contribution → terms.
-3. Submit terms (triggers `POST /api/bff/personal/join-dsp`).
-4. Observe failure when the BFF PATCHes the source DSA to remove reassigned categories.
+## Context
 
----
+In the **Manage contribution** flow (`/accounts/[dsAccountId]/manage/contribution`), when the user taps to **add categories** in the deactivated / non-contributing section, the app opens the **turn-off picker** (`activeCheckboxPlanId === unattributed`).
 
-## Expected behavior
+**Current behavior (works correctly):**
+- Checking categories removes them from plans and deactivates them (ownership → `null`)
+- Changes persist via `useUpdateDataSavingsAccounts` on save
+- Plan grouping (DSP header + checkbox list) partially exists today
 
-- DSA creation always includes a valid currency, **or**
-- PATCH/update endpoints return a clear client error (4xx) when currency is missing, **or**
-- Missing currency is backfilled/healed so category updates succeed.
+**Problem (UX/UI gap):**
+- There is no **dedicated layout** for this opt-out flow, per Subash’s design
+- The screen reuses the generic contribution edit header/copy (“select title”, description, info box), which confuses user intent
+- The **impact warning** (red destructive text) before the CTA is missing
+- Copy and visual hierarchy do not match the attached Figma
 
----
+## Design reference
 
-## Actual behavior
+Figma / Subash mock (attached):
+- Title: **Contribution settings**
+- Subtitle: **Choose categories that you'd like to stop contributing.**
+- Secondary text: **These settings will be applied to any future contributions.**
+- List grouped by plan (e.g. dSavings Smart, dSavings Fitness) with per-category checkboxes
+- Warning (red): **Data in selected categories will be turned off—it won't be licensed or monetized for future offers.**
+- Primary CTA: **Save changes**
 
-HTTP 500 from DSP API during `PATCH /v1/data-savings-accounts/{dsaId}` (or related account operations).
+## Technical scope (reference)
 
-Example response:
+| Area | File / route |
+|------|----------------|
+| Main page | `apps/web/src/personal/components/pages/plan-contribution/NewEditContributionsPage.tsx` |
+| Route | `apps/web/src/app/personal/accounts/[dsAccountId]/manage/contribution/page.tsx` |
+| Turn-off mode | `isTurnOffPickerMode` (`activeCheckboxPlanId === DSA_CONTRIBUTION_SECTION_ID_UNATTRIBUTED`) |
+| Checkbox list | `DsaContributionCheckboxList.tsx` |
+| Plan header | `DsaContributionDspHeader.tsx` |
+| i18n namespace | `savings-plan-manage` (+ possibly `shared` for CTA) |
 
-```json
-{
-  "ok": false,
-  "statusCode": 500,
-  "error": "",
-  "statusText": "HTTP 500: Account 22a1ace2-3099-4e9c-b1be-84f0d823cf39 has no associated currency"
-}
-```
+**Note:** Existing keys like `contributions.categories-off.title/description` may be reused or extended. New strings must be added in **Ditto** (do not edit READONLY files under `src/i18n/ditto/`).
 
----
+## Acceptance Criteria
 
-## Technical notes
+### Layout / copy (turn-off picker mode)
+- [ ] When entering the disable-categories flow (tap “+” on unattributed/turned-off section), the screen shows the Figma layout, **not** the generic contribution selection header
+- [ ] Title, subtitle, and secondary text match the design (via Ditto)
+- [ ] Categories are shown grouped by DSP plan, with plan header + checkbox per category
+- [ ] Impact warning in destructive/red styling appears above the save button
+- [ ] CTA shows **Save changes** in this mode
 
-- **Web BFF:** `apps/web/src/app/api/bff/personal/join-dsp/route.ts` — PATCHes source DSAs before `POST /v2/data-savings-plans/applications`.
-- **DSP API:** `data-savings-account.service.ts` — throws `InternalServerErrorException` when `account.currency?.code` is missing in `updateAccount`, `getAccountBalance`, `mapAccountToResponse`, etc.
-- **DSA provisioning:** `createDsaFromApplication` only connects currency when `app.currency` is present on the application; applications without `earningsGoal.currency` can produce DSAs with no currency.
+### Behavior (no regression)
+- [ ] Checking a category still removes it from the plan and deactivates it
+- [ ] Categories that are the sole contribution on a plan remain disabled (cannot be turned off) — preserve current behavior
+- [ ] Save stays disabled until there is a draft change (`hasChange`)
+- [ ] Back returns to main drag mode without incorrect state loss — preserve current behavior
 
----
+### Quality
+- [ ] Tests updated in `apps/web/tests/app/personal/accounts/[dsAccountId]/manage/contribution/page.test.tsx`
+- [ ] Storybook updated (turn-off picker variant), if applicable
+- [ ] Strings added in Ditto before merge
 
-## Impact
+## Out of scope
 
-Blocks join-a-plan flow for affected users in DEV (and potentially prod if bad data exists). Downstream UX (welcome screen, `/plans?dsaId=...`) is never reached.
+- Ownership/persistence logic changes (already works)
+- **Add categories from other plans** picker mode (normal checkbox mode) — separate layout/ticket if needed
+- `PlanContributionSettingsPage` (join flow at `/plans/[dspId]/contribution`) — unless design also applies there
 
----
+## How to test
 
-## Acceptance criteria
+1. Enable feature flag `pdwMultipleDspRelease`
+2. User with **2+ DSP plans** and active categories across plans
+3. Go to **Manage plan → Contribution settings** (`/accounts/{dsaId}/manage/contribution`)
+4. Tap **“+”** on the deactivated / non-contributing section
+5. Verify Figma layout, copy, and red warning
+6. Check categories (e.g. Travel & Transportation on dSavings Fitness) → **Save changes**
+7. Confirm categories were removed/deactivated on plans after refresh
 
-- [ ] New DSAs are created with a required/default currency for the plan region.
-- [ ] Existing DSAs missing currency are identified and remediated (migration/script) or handled gracefully.
-- [ ] Account update/balance endpoints do not return opaque 500 for missing currency; use actionable 4xx where appropriate.
-- [ ] Join flow succeeds end-to-end for a user moving categories from an existing DSA to a new commercial plan.
+## Dependencies
 
----
+- Final design from Subash (Figma link, if available)
+- Copy/strings in Ditto (`savings-plan-manage` namespace)
+
+## Suggested labels
+
+`PdW`, `DSP`, `Contribution`, `UX`
+
+## Epic / component
+
+Personal dWallet — Data Savings Plans / Manage Contribution
