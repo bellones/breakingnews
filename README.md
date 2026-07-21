@@ -1,100 +1,152 @@
-## Title
+# EnforcePlus — Silent Citation Photo Loss on Issue
 
-PdW | Contribution settings | Dedicated opt-out layout when disabling non-contributing categories
+**Component:** EnforcePlus officer app (React Native) — citation issuance flow  
+**Severity:** High — data loss with zero visibility to officer, admin, or system logs  
+**Type:** Bug / Investigation findings (engineering confirmed in code)  
+**Related citation (example):** `8025-CYKG-81` (Shamrock Parking / Atlas 236)  
+**Firestore ticket path:** `/clients/RqvJ9Oz4E0s53xbW1ESb/locations/rS7slIsIsM19ixKNsswt/tickets/0B9xapyuPXWow5po9ryo`  
+**Investigation date:** 2026-07-21  
 
-## Type
+---
 
-Story / UI Enhancement
+## Summary
 
-## User Story
+When an officer issues a citation with photos, the app can **create the citation successfully while silently dropping the photos**. No error is shown to the officer, nothing durable is logged, and there is no retry across app restarts. Once it happens, photos are effectively **permanently unrecoverable**.
 
-As a Personal dWallet user with multiple DSP plans,  
-I want a clear layout when I choose to stop contributing categories,  
-so I understand which categories will be deactivated and the impact before saving.
+Code investigation **confirms** the reported root cause in `issueTicket()` (`src/actions/vehicleActions.js`).
 
-## Context
+---
 
-In the **Manage contribution** flow (`/accounts/[dsAccountId]/manage/contribution`), when the user taps to **add categories** in the deactivated / non-contributing section, the app opens the **turn-off picker** (`activeCheckboxPlanId === unattributed`).
+## User / operational impact
 
-**Current behavior (works correctly):**
-- Checking categories removes them from plans and deactivates them (ownership → `null`)
-- Changes persist via `useUpdateDataSavingsAccounts` on save
-- Plan grouping (DSP header + checkbox list) partially exists today
+* Citations can lack legally/operationally important photo evidence.
+* Often discovered only when a client disputes the citation — long after the stop.
+* Officer has no signal that photos failed; cannot self-correct in the field.
+* No fleet metrics/alerts exist to detect how often this occurs.
 
-**Problem (UX/UI gap):**
-- There is no **dedicated layout** for this opt-out flow, per Subash’s design
-- The screen reuses the generic contribution edit header/copy (“select title”, description, info box), which confuses user intent
-- The **impact warning** (red destructive text) before the CTA is missing
-- Copy and visual hierarchy do not match the attached Figma
+---
 
-## Design reference
+## How it happens (confirmed in code)
 
-Figma / Subash mock (attached):
-- Title: **Contribution settings**
-- Subtitle: **Choose categories that you'd like to stop contributing.**
-- Secondary text: **These settings will be applied to any future contributions.**
-- List grouped by plan (e.g. dSavings Smart, dSavings Fitness) with per-category checkboxes
-- Warning (red): **Data in selected categories will be turned off—it won't be licensed or monetized for future offers.**
-- Primary CTA: **Save changes**
+### Primary file
 
-## Technical scope (reference)
+* `src/actions/vehicleActions.js` — `issueTicket()` (~lines 667–877)
+* `src/tools/index.js` — `uploadImageToStorageAsync()` (~lines 194–309)
+* Caller: `src/containers/IssueTicket/IssueTicket.js` — `proceed()` awaits ticket create, then navigates to Print
 
-| Area | File / route |
-|------|----------------|
-| Main page | `apps/web/src/personal/components/pages/plan-contribution/NewEditContributionsPage.tsx` |
-| Route | `apps/web/src/app/personal/accounts/[dsAccountId]/manage/contribution/page.tsx` |
-| Turn-off mode | `isTurnOffPickerMode` (`activeCheckboxPlanId === DSA_CONTRIBUTION_SECTION_ID_UNATTRIBUTED`) |
-| Checkbox list | `DsaContributionCheckboxList.tsx` |
-| Plan header | `DsaContributionDspHeader.tsx` |
-| i18n namespace | `savings-plan-manage` (+ possibly `shared` for CTA) |
+### Step-by-step
 
-**Note:** Existing keys like `contributions.categories-off.title/description` may be reused or extended. New strings must be added in **Ditto** (do not edit READONLY files under `src/i18n/ditto/`).
+1. Officer attaches photos and taps generate/issue.
+2. Each photo must finish **resize → crop → upload → getDownloadURL** inside a **shared** budget of **`MAX_UPLOAD_WAIT_MS = 3500`** (3.5 seconds total for all photos, not per photo).
+3. Any photo that times out or errors is pushed to an in-memory `backgroundQueue` instead of being attached to the ticket payload.
+4. The ticket document is created immediately with:
+   * `images: tempImageUrls.length > 0 ? tempImageUrls : null`
+   * If nothing finished in 3.5s → **`images: null` from creation**.
+5. App treats issuance as success and navigates to Print.
+6. Deferred photos are uploaded via `backgroundQueue.forEach(async …)`:
+   * **No await**
+   * **No retry**
+   * **Not persisted** (lost if JS thread suspends / app backgrounds / navigate away)
+   * On failure: only `console.log('Background image upload failed', e)` — not Crashlytics, not Firestore, not UI
 
-## Acceptance Criteria
+### Storage naming (blocks recovery)
 
-### Layout / copy (turn-off picker mode)
-- [ ] When entering the disable-categories flow (tap “+” on unattributed/turned-off section), the screen shows the Figma layout, **not** the generic contribution selection header
-- [ ] Title, subtitle, and secondary text match the design (via Ditto)
-- [ ] Categories are shown grouped by DSP plan, with plan header + checkbox per category
-- [ ] Impact warning in destructive/red styling appears above the save button
-- [ ] CTA shows **Save changes** in this mode
+Upload path pattern:
 
-### Behavior (no regression)
-- [ ] Checking a category still removes it from the plan and deactivates it
-- [ ] Categories that are the sole contribution on a plan remain disabled (cannot be turned off) — preserve current behavior
-- [ ] Save stays disabled until there is a draft change (`hasChange`)
-- [ ] Back returns to main drag mode without incorrect state loss — preserve current behavior
+`/citiation_images/{officerUid}_{timestampMs}_idx{n}_r{random}.jpg`
 
-### Quality
-- [ ] Tests updated in `apps/web/tests/app/personal/accounts/[dsAccountId]/manage/contribution/page.test.tsx`
-- [ ] Storybook updated (turn-off picker variant), if applicable
-- [ ] Strings added in Ditto before merge
+* Typo folder: `citiation_images` (not `citation_images`)
+* **No ticket ID**, plate, location, or violation number in path/filename
+* Cannot reliably correlate Storage objects to a ticket after the fact (confirmed operationally on this case)
 
-## Out of scope
+---
 
-- Ownership/persistence logic changes (already works)
-- **Add categories from other plans** picker mode (normal checkbox mode) — separate layout/ticket if needed
-- `PlanContributionSettingsPage` (join flow at `/plans/[dspId]/contribution`) — unless design also applies there
+## Evidence for citation 8025-CYKG-81
 
-## How to test
+* Ticket `images` field: **`null`** (never populated)
+* No Storage object found for this officer near `created_at` (`2026-07-19T02:23:11.310Z` UTC) matching the cited vehicle (white Kia SUV, plate A9429338)
+* Closest-in-time Storage candidates were unrelated stops
+* Conclusion: photo(s) most likely **never left the device successfully** (capture/upload failure or abandoned background work), not merely a failed Firestore link after upload
 
-1. Enable feature flag `pdwMultipleDspRelease`
-2. User with **2+ DSP plans** and active categories across plans
-3. Go to **Manage plan → Contribution settings** (`/accounts/{dsaId}/manage/contribution`)
-4. Tap **“+”** on the deactivated / non-contributing section
-5. Verify Figma layout, copy, and red warning
-6. Check categories (e.g. Travel & Transportation on dSavings Fitness) → **Save changes**
-7. Confirm categories were removed/deactivated on plans after refresh
+---
 
-## Dependencies
+## Code references (for engineering)
 
-- Final design from Subash (Figma link, if available)
-- Copy/strings in Ditto (`savings-plan-manage` namespace)
+| Behavior | Location |
+|---|---|
+| Shared 3.5s upload budget + `backgroundQueue` | `vehicleActions.js` ~691–716 |
+| Ticket created with `images: null` if empty | `vehicleActions.js` ~749 |
+| Fire-and-forget background upload + `arrayUnion` | `vehicleActions.js` ~819–846 |
+| Failure = `console.log` only | `vehicleActions.js` ~843–844 |
+| Storage filename without ticket ID | `tools/index.js` ~286–290 |
+| UI navigates on ticket create with no photo check | `IssueTicket.js` `proceed()` ~448–480 |
 
-## Suggested labels
+### Related (same class of risk)
 
-`PdW`, `DSP`, `Contribution`, `UX`
+* **Print** placement photo (`Print.js`): also fire-and-forget upload after print; ticket ID exists for write-back, but failures are still poorly surfaced
+* **Chalk** flow: safer — awaits upload before writing docs; path includes vehicle/wheel context
 
-## Epic / component
+### Separate bug found nearby
 
-Personal dWallet — Data Savings Plans / Manage Contribution
+* After successful ticket create, `removeViolation` / user+location activity dispatches (~871–875) are **unreachable** because all branches `return` earlier. Worth fixing in the same area of `issueTicket`.
+
+---
+
+## Why this is High
+
+* Silent data loss
+* Zero officer visibility
+* Zero durable logging / observability
+* Unrecoverable after the fact due to Storage naming
+* Real production citation confirmed with `images: null`
+
+---
+
+## Suggested fix directions
+
+> Not prescriptive — for engineering to prioritize.
+
+### P0 — stop silent loss
+
+1. Do not treat citation as “done” for the officer until photos are confirmed uploaded, **or** show a clear pending/failed indicator if they are not.
+2. Persist a **local retry queue** (e.g. AsyncStorage + files copied to app documents) keyed by `ticketId`, resume on next launch/foreground.
+3. Surface upload failures in-app (toast/banner) instead of only `console.log`; also record to Crashlytics / durable log.
+
+### P1 — make failures recoverable & measurable
+
+4. Embed ticket ID in Storage path, e.g. `citiation_images/{clientId}/{locationId}/{ticketId}/{n}.jpg` (create ticket first, then upload).
+5. Add metrics/alerts: citations issued with intended photos vs final `images` length.
+6. Prefer: create ticket → upload with known ID → `arrayUnion` → clear pending flag.
+
+### P2 — hygiene
+
+7. Fix unreachable `removeViolation` / activity logging in `issueTicket`.
+8. Align Print / other capture flows with the same retry + surfacing pattern.
+9. Fix folder typo when migrating path scheme.
+
+---
+
+## Acceptance criteria (proposed)
+
+* [ ] If officer attached N photos, ticket ends with N images **or** officer sees explicit pending/failed state with retry
+* [ ] Background/deferred uploads survive app backgrounding and restart
+* [ ] Upload / attach failures are visible to officer and logged durably (Crashlytics or equivalent)
+* [ ] New uploads include `ticketId` in Storage path for auditability
+* [ ] QA can reproduce timeout path (slow network) and verify no silent `images: null` without UI warning
+
+---
+
+## Suggested QA checks
+
+1. Issue citation with 1–4 photos on slow network / airplane mode mid-upload → verify UI does not silently proceed as fully successful without photo state.
+2. Kill app during deferred upload → relaunch → pending photos still attach to same ticket.
+3. Confirm Firestore ticket `images` populated after success.
+4. Confirm Storage objects live under ticket-scoped path (after fix).
+5. Regression: chalk + Print placement photo still work.
+
+---
+
+## Attachments / links
+
+* Investigation performed against current EnforcePlus RN codebase (`issueTicket` / `uploadImageToStorageAsync`)
+* Example ticket: `0B9xapyuPXWow5po9ryo` / violation `8025-CYKG-81`
