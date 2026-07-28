@@ -1,152 +1,149 @@
-# EnforcePlus — Silent Citation Photo Loss on Issue
+# Security: Leaked Firebase Admin SDK Key in oob_app_5
 
-**Component:** EnforcePlus officer app (React Native) — citation issuance flow  
-**Severity:** High — data loss with zero visibility to officer, admin, or system logs  
-**Type:** Bug / Investigation findings (engineering confirmed in code)  
-**Related citation (example):** `8025-CYKG-81` (Shamrock Parking / Atlas 236)  
-**Firestore ticket path:** `/clients/RqvJ9Oz4E0s53xbW1ESb/locations/rS7slIsIsM19ixKNsswt/tickets/0B9xapyuPXWow5po9ryo`  
-**Investigation date:** 2026-07-21  
+**Status:** Repo fix done locally — pending commit/merge  
+**Priority:** High  
+**Labels:** `security`, `firebase`, `secrets`, `oob_app_5`
+
+| Field | Value |
+|---|---|
+| **Project** | OOB |
+| **Issue type** | Task (or Security / Bug) |
+| **Reporter** | Midhet Dulovic (incidental finding) |
+| **Repository** | `oob_app_5` / `OobeoApp` |
 
 ---
 
 ## Summary
 
-When an officer issues a citation with photos, the app can **create the citation successfully while silently dropping the photos**. No error is shown to the officer, nothing durable is logged, and there is no retry across app restarts. Once it happens, photos are effectively **permanently unrecoverable**.
+Remove leaked Firebase Admin SDK service account key from `oob_app_5` repository.
 
-Code investigation **confirms** the reported root cause in `issueTicket()` (`src/actions/vehicleActions.js`).
+A Firebase Admin SDK service account private key was committed to the mobile app repository. Admin SDK keys grant full Firebase project admin access (bypassing security rules) and must never be stored in a client/mobile repo.
 
----
-
-## User / operational impact
-
-* Citations can lack legally/operationally important photo evidence.
-* Often discovered only when a client disputes the citation — long after the stop.
-* Officer has no signal that photos failed; cannot self-correct in the field.
-* No fleet metrics/alerts exist to detect how often this occurs.
-
----
-
-## How it happens (confirmed in code)
-
-### Primary file
-
-* `src/actions/vehicleActions.js` — `issueTicket()` (~lines 667–877)
-* `src/tools/index.js` — `uploadImageToStorageAsync()` (~lines 194–309)
-* Caller: `src/containers/IssueTicket/IssueTicket.js` — `proceed()` awaits ticket create, then navigates to Print
-
-### Step-by-step
-
-1. Officer attaches photos and taps generate/issue.
-2. Each photo must finish **resize → crop → upload → getDownloadURL** inside a **shared** budget of **`MAX_UPLOAD_WAIT_MS = 3500`** (3.5 seconds total for all photos, not per photo).
-3. Any photo that times out or errors is pushed to an in-memory `backgroundQueue` instead of being attached to the ticket payload.
-4. The ticket document is created immediately with:
-   * `images: tempImageUrls.length > 0 ? tempImageUrls : null`
-   * If nothing finished in 3.5s → **`images: null` from creation**.
-5. App treats issuance as success and navigates to Print.
-6. Deferred photos are uploaded via `backgroundQueue.forEach(async …)`:
-   * **No await**
-   * **No retry**
-   * **Not persisted** (lost if JS thread suspends / app backgrounds / navigate away)
-   * On failure: only `console.log('Background image upload failed', e)` — not Crashlytics, not Firestore, not UI
-
-### Storage naming (blocks recovery)
-
-Upload path pattern:
-
-`/citiation_images/{officerUid}_{timestampMs}_idx{n}_r{random}.jpg`
-
-* Typo folder: `citiation_images` (not `citation_images`)
-* **No ticket ID**, plate, location, or violation number in path/filename
-* Cannot reliably correlate Storage objects to a ticket after the fact (confirmed operationally on this case)
-
----
-
-## Evidence for citation 8025-CYKG-81
-
-* Ticket `images` field: **`null`** (never populated)
-* No Storage object found for this officer near `created_at` (`2026-07-19T02:23:11.310Z` UTC) matching the cited vehicle (white Kia SUV, plate A9429338)
-* Closest-in-time Storage candidates were unrelated stops
-* Conclusion: photo(s) most likely **never left the device successfully** (capture/upload failure or abandoned background work), not merely a failed Firestore link after upload
-
----
-
-## Code references (for engineering)
-
-| Behavior | Location |
+| Item | Detail |
 |---|---|
-| Shared 3.5s upload budget + `backgroundQueue` | `vehicleActions.js` ~691–716 |
-| Ticket created with `images: null` if empty | `vehicleActions.js` ~749 |
-| Fire-and-forget background upload + `arrayUnion` | `vehicleActions.js` ~819–846 |
-| Failure = `console.log` only | `vehicleActions.js` ~843–844 |
-| Storage filename without ticket ID | `tools/index.js` ~286–290 |
-| UI navigates on ticket create with no photo check | `IssueTicket.js` `proceed()` ~448–480 |
-
-### Related (same class of risk)
-
-* **Print** placement photo (`Print.js`): also fire-and-forget upload after print; ticket ID exists for write-back, but failures are still poorly surfaced
-* **Chalk** flow: safer — awaits upload before writing docs; path includes vehicle/wheel context
-
-### Separate bug found nearby
-
-* After successful ticket create, `removeViolation` / user+location activity dispatches (~871–875) are **unreachable** because all branches `return` earlier. Worth fixing in the same area of `issueTicket`.
+| **File** | `OobeoApp/oobeo-valetware-firebase-adminsdk-icgk0-4d28c6a06c.json` |
+| **Firebase project** | `oobeo-valetware` (legacy; current mobile Crashlytics uses `oobeo-prod`) |
+| **Service account** | `firebase-adminsdk-icgk0@oobeo-valetware.iam.gserviceaccount.com` |
 
 ---
 
-## Why this is High
+## Diagnosis
 
-* Silent data loss
-* Zero officer visibility
-* Zero durable logging / observability
-* Unrecoverable after the fact due to Storage naming
-* Real production citation confirmed with `images: null`
+### Exposure
 
----
+- File was tracked in git (`git ls-files`) and **not** covered by `.gitignore`.
+- Key type: Firebase Admin SDK service account JSON (full project admin access).
 
-## Suggested fix directions
+### Who introduced it
 
-> Not prescriptive — for engineering to prioritize.
+| Field | Value |
+|---|---|
+| **Author** | Matt Ormrod (`matt.ormrod@oobeo.com`) |
+| **Commit** | `2b4c1c00` — *"EV amends"* |
+| **Date** | 2024-07-12 |
 
-### P0 — stop silent loss
+```bash
+git log --follow -- OobeoApp/oobeo-valetware-firebase-adminsdk-icgk0-4d28c6a06c.json
+```
 
-1. Do not treat citation as “done” for the officer until photos are confirmed uploaded, **or** show a clear pending/failed indicator if they are not.
-2. Persist a **local retry queue** (e.g. AsyncStorage + files copied to app documents) keyed by `ticketId`, resume on next launch/foreground.
-3. Surface upload failures in-app (toast/banner) instead of only `console.log`; also record to Crashlytics / durable log.
+### App impact
 
-### P1 — make failures recoverable & measurable
+**None.** The mobile app does not reference this file in code. The app uses client SDK configs only:
 
-4. Embed ticket ID in Storage path, e.g. `citiation_images/{clientId}/{locationId}/{ticketId}/{n}.jpg` (create ticket first, then upload).
-5. Add metrics/alerts: citations issued with intended photos vs final `images` length.
-6. Prefer: create ticket → upload with known ID → `arrayUnion` → clear pending flag.
+- `firebase/production/google-services.json` (Android)
+- `firebase/production/GoogleService-Info.plist` (iOS)
 
-### P2 — hygiene
+The admin key appears to be an orphaned/accidental commit from 2024.
 
-7. Fix unreachable `removeViolation` / activity logging in `issueTicket`.
-8. Align Print / other capture flows with the same retry + surfacing pattern.
-9. Fix folder typo when migrating path scheme.
+### Risk
 
----
-
-## Acceptance criteria (proposed)
-
-* [ ] If officer attached N photos, ticket ends with N images **or** officer sees explicit pending/failed state with retry
-* [ ] Background/deferred uploads survive app backgrounding and restart
-* [ ] Upload / attach failures are visible to officer and logged durably (Crashlytics or equivalent)
-* [ ] New uploads include `ticketId` in Storage path for auditability
-* [ ] QA can reproduce timeout path (slow network) and verify no silent `images: null` without UI warning
+Anyone with repo access (or full git history) could use the key for full admin access to Firebase project `oobeo-valetware`.
 
 ---
 
-## Suggested QA checks
+## Solution (repo remediation)
 
-1. Issue citation with 1–4 photos on slow network / airplane mode mid-upload → verify UI does not silently proceed as fully successful without photo state.
-2. Kill app during deferred upload → relaunch → pending photos still attach to same ticket.
-3. Confirm Firestore ticket `images` populated after success.
-4. Confirm Storage objects live under ticket-scoped path (after fix).
-5. Regression: chalk + Print placement photo still work.
+### Done locally (pending commit/merge)
+
+1. **Removed** `OobeoApp/oobeo-valetware-firebase-adminsdk-icgk0-4d28c6a06c.json` from git tracking (`git rm`).
+2. **Updated** `OobeoApp/.gitignore` to block future commits:
+   - `*firebase-adminsdk*.json`
+   - `**/firebase-adminsdk*.json`
+   - `oobeo-valetware-firebase-adminsdk-*.json`
+3. **Added** security note to `OobeoApp/firebase/README.md` — Admin SDK keys must not be committed to this mobile repo.
+
+### Pending
+
+- Commit and merge these changes to `master`.
 
 ---
 
-## Attachments / links
+## Remaining actions (manual — required)
 
-* Investigation performed against current EnforcePlus RN codebase (`issueTicket` / `uploadImageToStorageAsync`)
-* Example ticket: `0B9xapyuPXWow5po9ryo` / violation `8025-CYKG-81`
+### 1. Rotate / revoke compromised key (URGENT)
+
+Treat the key as **compromised**:
+
+1. Firebase Console → project **oobeo-valetware** → Project Settings → Service Accounts
+2. Delete/revoke service account key ID `4d28c6a06c...` (`firebase-adminsdk-icgk0`)
+3. Only generate a replacement if a **backend/server** still needs it
+4. Store any new key in a secret manager / CI env var — **never** in `oob_app_5`
+
+### 2. Git history scrub (team decision)
+
+The key remains in git history since 2024-07-12.
+
+| Scenario | Recommendation |
+|---|---|
+| Private repo, limited access | Remove from HEAD + key rotation may be sufficient |
+| Broader exposure (forks, former contractors, public mirror) | Use `git filter-repo` or BFG Repo-Cleaner to purge the file from history |
+
+**Warning:** History rewrite requires coordinated force-push — do not do unilaterally.
+
+Example (if team approves):
+
+```bash
+# git filter-repo --path OobeoApp/oobeo-valetware-firebase-adminsdk-icgk0-4d28c6a06c.json --invert-paths
+```
+
+### 3. Confirm no backend dependency
+
+Verify whether any server/backend still uses `oobeo-valetware` Admin SDK credentials before deleting the service account entirely.
+
+---
+
+## Acceptance criteria
+
+- [ ] Admin SDK JSON removed from repo default branch
+- [ ] `.gitignore` prevents re-addition of `*firebase-adminsdk*.json`
+- [ ] Compromised key revoked in Firebase Console (`oobeo-valetware`)
+- [ ] Team decision documented on whether git history scrub is required
+- [ ] No Admin SDK keys loaded from committed files anywhere in `oob_app_5`
+
+---
+
+## Jira ticket (copy-paste)
+
+**Summary:**
+
+```
+Remove leaked Firebase Admin SDK service account key from oob_app_5 repo
+```
+
+**Resolution comment (after merge):**
+
+```
+Repo fix merged: Admin SDK JSON removed and gitignore updated.
+
+Still required: revoke key in Firebase Console (oobeo-valetware → firebase-adminsdk-icgk0).
+Mobile app was never consuming this file — no app release needed for this fix.
+```
+
+---
+
+## References
+
+- Commit that introduced the key: `2b4c1c00` (Matt Ormrod, 2024-07-12)
+- Current mobile Firebase configs: `OobeoApp/firebase/production/` (project `oobeo-prod`)
+- Original reporter: Midhet Dulovic — found during unrelated RequestAhead/valet-app investigation
+- Related doc: [firebase-crashlytics.md](./firebase-crashlytics.md)
