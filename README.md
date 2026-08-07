@@ -1,251 +1,274 @@
-# Study: Oversized images uploaded to storage (Oobeo Operator App)
+## IFR M2M Token Wiring Validation Report — Web UI Only
 
-**Requested by:** Midhet (backend / bucket review)  
-**App:** Oobeo Valet Operator (`oob_app_5` / `OobeoApp`)  
-**Date:** 2026-08-03  
-**Environment impact:** Production S3 / photograph storage via `POST photographs/upload/`
+### Scope
+
+Validated the IFR user-management call sites that are reachable from the current web applications in the dev environment.
+
+This report intentionally excludes Admin UI / Cognito console validation. Because of that, Cognito side-effects such as group membership, `dWalletId` attributes, phone attributes, and user enabled/disabled state were **not directly verified** here. Those require either Admin UI, Cognito access, Ownership outbox inspection, or backend logs.
+
+### Environment
+
+- Business app: dev environment
+- Personal app: dev environment
+- Validation method: browser UI + DevTools Network
+- No functional code changes were made as part of this validation.
 
 ---
 
 ## Summary
 
-Client photo uploads (visit/car detail photos and validation photos) can still land in the bucket larger than intended. The app **has** a compression path (`@bam.tech/react-native-image-resizer`), but several gaps mean full-resolution captures often skip resize, use incorrect metadata, or fall back to the original file.
+### Reachable Through Web UI
 
-**Likely outcome in the bucket:** multi‑MB JPEGs (especially modern Android/iPhone sensors), instead of a consistent ~200–500KB / ≤1080px asset.
+The following catalogue items are reachable from the current web apps:
 
----
+- `POST /business`
+- `DELETE /business/:id/employees/:employeeId`
+- `PATCH /person/:id` for phone set/update
+- `PATCH /person/:id` for phone clear, via `DELETE /api/bff/phone`
+- `POST /auth/phone/verify`, via `POST /api/bff/phone/verify`
 
-## Upload pipeline (current)
+### Not Reachable Through Current Web UI
 
-```
-Camera takePhoto (VisionCamera)
-    → validateImageDimensions()   // LOG ONLY — does NOT resize pixels
-    → submitPhoto / submitValidationPhoto
-        → FileUploader.upload()
-            → processImageForUpload()
-                → compressImageForDetailPhotos()  // real resize (when it runs)
-                → validateImageDimensions()       // log only again
-            → POST {API_URL}photographs/upload/  (multipart)
-```
+The following catalogue items were not validated through the web UI because no current screen in this repo appears to trigger them directly:
 
-| Step | File | Behavior |
-|------|------|----------|
-| Capture | `CarDetails.js`, `useReceives.js`, `useCarDetails.js`, validation modals | `react-native-vision-camera` `takePhoto` |
-| Pre-submit “validate” | `imageUtils.validateImageDimensions` | Computes optimal size but **does not rewrite the file** |
-| Upload | `submitPhoto.js` → `FileUploader.js` | Calls `processImageForUpload` then multipart POST |
-| Compress | `imageUtils.compressImageForDetailPhotos` | ImageResizer → max ~1080px, JPEG quality **50**, skip if ≤**900KB** and dims ≤**1600** |
-| Endpoint | `photographs/upload/` | Backend stores to bucket |
+- `DELETE /employee/:id`
+- `DELETE /person/me`
+- `DELETE /person/:id`
+- `PUT /business/:id/employees/:employeeId`
+- `PATCH /employee/:id/role`
+- `POST /employee/:id/restore`
+- `POST /trash/recover/:entityType/:entityId`
+- `POST /trash/recover/:trashId`
 
-**Not the same path:** License plate OCR uses `compressImageForLicensePlate` / ViewShot (target ~480×360, ~200KB) for scanning APIs — separate from visit photograph bucket uploads.
+These should be validated separately through direct API calls, backend tooling, Ownership logs, or the internal admin surface.
 
 ---
 
-## Intended limits (as coded today)
+## Detailed Results
 
-| Setting | Value | Where |
-|---------|-------|--------|
-| Camera format preference | ≤1080px max side | `cameraUtils.getOptimalCameraFormat` |
-| Detail compress max dimension | Param default **1600**; actual resize uses `getOptimalImageDimensions` default **1080** | `compressImageForDetailPhotos` |
-| Skip compress if file ≤ | **900 KB** | `compressImageForDetailPhotos` |
-| JPEG quality when compressing | **50** | `compressImageForDetailPhotos` |
-| Upload timeout | 30s | `FileUploader._headers` |
+### Business App — Manage Users
 
-Comments in code still say “1080px max” and “camera quality settings instead of post-processing,” but **format selection alone does not guarantee capture resolution** (especially iOS).
+Catalogue coverage:
 
----
+- `DELETE /business/:id/employees/:employeeId`
+- Expected outbox side-effects:
+  - `UNSET_DWALLET`
+  - `REMOVE_ORG_ROLE`
 
-## Root causes (why bucket objects are still large)
+Screen tested:
 
-### 1. `validateImageDimensions` does not resize (misleading name)
+- Business app → `/account/users`
 
-```js
-// imageUtils.js — only logs; returns same uri
-console.warn('Image will be uploaded at full size...');
-```
+Observed:
 
-Callers (`CarDetails`, Receive, etc.) treat this as “processed,” but the file on disk is unchanged until `FileUploader` runs.
+- The Manage Users screen loaded successfully.
+- The employees/invites data request returned a successful response.
+- The UI displayed the current account administrator and account manager invitation card.
+- Delete and Resend actions were visible for the invite/user card.
 
-### 2. Fake width/height from camera **format**, not the photo file
+Result:
 
-Example from `CarDetails.js`:
+- Precondition confirmed: authenticated Business user can load the user-management screen and fetch user data successfully.
+- Destructive delete action was not confirmed in the provided evidence.
+- Cognito side-effects were not verified because Admin UI/Cognito validation was out of scope.
 
-```js
-const validatedData = await validateImageDimensions({
-  ...data,
-  width: formatRef.current?.videoWidth || 1920,
-  height: formatRef.current?.videoHeight || 1080,
-});
-```
+Status:
 
-VisionCamera often captures at **sensor resolution** (e.g. 4032×3024) while metadata passed downstream is the selected format (e.g. 1080×720).
-
-**Impact on skip logic in `compressImageForDetailPhotos`:**
-
-```js
-const meetsDimensions = imageData.width <= 1600 && imageData.height <= 1600;
-const meetsSize = fileInfo.sizeKB <= 900;
-if (meetsSize && meetsDimensions) return imageData; // skip — NO resize
-```
-
-If the **reported** dims are ≤1600 and the file happens to be ≤900KB, compression is skipped even when the **true** resolution is much higher.  
-If width/height are missing entirely, compress **returns immediately** with the original file.
-
-### 3. Skip threshold (900KB) is still large for storage / mobile networks
-
-Even when “within limits,” ~900KB × N photos per visit adds up quickly in S3 and slows uploads on poor LTE.
-
-### 4. Failures silently upload originals
-
-| Failure | Fallback |
-|---------|----------|
-| `compressImageForDetailPhotos` throws | returns original `imageData` |
-| `processImageForUpload` throws | returns original |
-| `FileUploader.upload` processing catch | POSTs **original** multipart body |
-
-Any ImageResizer / path / iOS URI glitch → full-size upload.
-
-### 5. Capture settings favor quality over size
-
-`getOptimalPhotoOptions` uses `qualityPrioritization: 'quality'`.  
-Validation flows use `'speed'` (better), but detail photos do not.
-
-### 6. No hard max bytes before POST
-
-There is Alert text for “File too large” in `submitPhoto`, but no client-side reject if compressed size still exceeds a budget (e.g. 500KB). Backend/bucket receives whatever multipart sends.
-
-### 7. Batch uploads multiply cost
-
-Receive / CarDetails can queue **multiple** photos (`Promise.all` / `forEach` submit). Large per-file size × count = timeouts (already partially why compress was added) and bucket bloat.
+- Partially validated from UI.
+- Still needs execution of the delete action and backend/outbox confirmation.
 
 ---
 
-## Flows that hit the bucket
+### Business App — Business Creation / Email Verification Flow
 
-| UX | Entry | Upload helper |
-|----|--------|----------------|
-| Receive / Park photos | `useReceives` / `ReceiveContainer` / `CarDetails` | `submitPhoto(image, visitId, carId)` |
-| Deferred photos after visit create | same, from `imageArray` | `submitPhoto` batch |
-| Pay-at-stand validation image | `usePayAtStands` | `submitValidationPhoto` |
-| Event parking validation image | `useEventParkingPayments` | `submitValidationPhoto` |
+Catalogue coverage:
 
-All share `FileUploader` → same compress gaps.
+- `POST /business`
+- Expected outbox side-effects:
+  - `SET_DWALLET`
+  - `ADD_ORG_ROLE`
 
----
+Screen tested:
 
-## Recommended fix (product + engineering)
+- Business account verification/onboarding flow
 
-### Target policy (proposed)
+Observed:
 
-| Metric | Target |
-|--------|--------|
-| Max dimension | **1280px** (or 1080px) longest side |
-| JPEG quality | **60–70** (tune vs readability for damage/plate context) |
-| Max file size after compress | **≤ 400–500 KB** (hard retry/recompress if over) |
-| Format | Always JPEG for upload (no PNG) |
-| Metadata | Read **actual** image dimensions (Image.getSize / resizer output), never format videoWidth/Height |
+- The email verification screen was reached.
+- Verification failed with:
+  - `400 Bad Request`
+  - `Code not found`
 
-### Implementation outline
+Result:
 
-1. **Unify** one `preparePhotographForUpload(uri)` used by all capture paths.  
-2. Always run ImageResizer with `onlyScaleDown: true` unless file already ≤ target bytes **and** actual dims ≤ max.  
-3. If still over max KB → second pass (lower quality / smaller max edge).  
-4. If still over → block upload + user message (do not POST original).  
-5. Fix callers to stop injecting format dimensions; use `Image.getSize` or takePhoto metadata.  
-6. Prefer `qualityPrioritization: 'balanced'` or `'speed'` for detail capture.  
-7. Add metrics: log `originalBytes`, `finalBytes`, `resized` to Crashlytics/Bugsnag custom keys for Midhet’s validation.  
-8. Unit tests for compress skip/resize/fallback; fixture images at 12MP and 2MP.
+- The flow did not reach a successful `POST /business` call in the captured evidence.
+- Because the verification code failed, the business creation side-effects could not be validated from UI.
 
-### Out of scope (follow-ups)
+Status:
 
-- Server-side image transcoding on `photographs/upload/` (defense in depth — recommended later).  
-- License-plate OCR pipeline (already more aggressive).  
-- Historical bucket cleanup / reprocess of old oversized objects.
+- Not validated.
+- Blocked by invalid/missing verification code.
+
+Follow-up:
+
+- Retry with a fresh verification code or a test account whose email verification can complete successfully.
 
 ---
 
-## Acceptance criteria (for implementation ticket)
+### Personal App — Phone Number Clear
 
-- [ ] Visit detail photo upload: longest side ≤ 1280px (or agreed limit)  
-- [ ] Typical outdoor photo ≤ 500KB after client compress  
-- [ ] Missing/incorrect width/height never causes skip of compress  
-- [ ] Compress failure does **not** upload multi‑MB original without retry/block  
-- [ ] Validation photos use the same pipeline  
-- [ ] Logging shows before/after size in release builds (remote-friendly)  
-- [ ] QA: Pixel + recent iPhone, 1 and 4 photos per visit, slow network  
+Catalogue coverage:
+
+- `PATCH /person/:id`
+- Expected outbox side-effect:
+  - `DELETE_PHONE_FROM_COGNITO`
+
+Screen tested:
+
+- Personal app → `/profile/phone`
+
+Observed:
+
+- The phone number screen loaded.
+- Removing the phone number triggered an error in the UI:
+  - “Failed to delete phone number. Please try again.”
+- DevTools Network showed the request returning:
+  - `{"error":"Internal Server Error"}`
+
+Expected behavior:
+
+- `DELETE /api/bff/phone` should return 2xx.
+- The BFF should call Ownership `PATCH /person/:id` with:
+  - `phoneNumber: null`
+  - `mfaEnabled: false`
+- Ownership should enqueue/process `DELETE_PHONE_FROM_COGNITO`.
+
+Actual behavior:
+
+- The UI request failed with an internal server error.
+
+Status:
+
+- Failed.
+
+Follow-up bug candidate:
+
+- Investigate why `DELETE /api/bff/phone` returns 500 in dev.
+- Capture server logs for the BFF route and Ownership response.
+- Confirm whether the failure is related to missing/invalid auth headers, M2M token generation, or Ownership-side validation.
 
 ---
 
-## Jira ticket (copy-paste)
+### Personal App — Phone Number Update / OTP Verification
 
-### Summary
+Catalogue coverage:
 
+- `PATCH /person/:id`
+- `POST /auth/phone/verify`
+- Expected side-effects:
+  - `SYNC_PHONE_TO_COGNITO`
+  - `MARK_PHONE_VERIFIED`
+
+Screen tested:
+
+- Personal app → phone update flow
+- OTP verification screen
+
+Observed:
+
+- The user reached the phone verification screen.
+- The request flow included the phone verification endpoint path.
+- OTP verification was not completed in the captured evidence.
+
+Result:
+
+- The UI flow can reach the OTP verification step.
+- Successful `POST /auth/phone/verify` and the Cognito phone verification side-effect were not confirmed.
+
+Status:
+
+- Partially validated.
+- Needs a valid OTP to complete verification and confirm a 2xx response.
+
+---
+
+## Additional Observations
+
+### Missing Auth Header Error
+
+One captured network response showed:
+
+```json
+{
+  "ok": false,
+  "statusText": "Error",
+  "error": "No X-User-Access-Token header found",
+  "statusCode": 500
+}
 ```
-Oobeo app: reduce visit/validation photo size before S3 upload (oversized bucket objects)
-```
 
-### Description
+This should be investigated if it appears on one of the IFR-triggering endpoint calls. It may indicate that a request reached the backend without the expected user access token context.
 
-```markdown
-h2. Context
+Since the IFR change is specifically about M2M token wiring, this should be separated carefully from user-token forwarding issues.
 
-Midhet reported that images uploaded from the Oobeo Operator app to the photograph storage bucket are significantly larger than expected.
+### Certificate Warning On Dev Link
 
-Client: all clients using visit/car detail photos and validation photos  
-Product: Oobeo Valet Operator App  
-Endpoint: {{POST photographs/upload/}}
+One browser screen showed a Chrome certificate warning for a `*.drumwave.dev` URL:
 
-h2. Diagnosis (app study)
+- `NET::ERR_CERT_COMMON_NAME_INVALID`
 
-Upload path: VisionCamera {{takePhoto}} → {{validateImageDimensions}} (log only) → {{FileUploader}} → {{processImageForUpload}} → {{compressImageForDetailPhotos}} → multipart upload.
-
-Gaps causing oversized objects:
-
-# {{validateImageDimensions}} does *not* resize pixels (name is misleading).
-# Call sites pass *camera format* width/height (e.g. videoWidth/videoHeight or 1920x1080 defaults), not actual captured photo dimensions — can incorrectly skip compression when size ≤ 900KB.
-# Compress skip threshold is 900KB / 1600px — still large for storage and flaky networks.
-# On ImageResizer/processing failure, code falls back to uploading the *original* full-resolution file.
-# Capture uses {{qualityPrioritization: 'quality'}}; format selection ≤1080px is not guaranteed by the OS/camera stack.
-
-Evidence in code: {{app/lib/imageUtils.js}}, {{app/lib/FileUploader.js}}, {{app/components/CarDetails.js}}, {{app/containers/receives/useReceives.js}}, {{app/lib/submitPhoto.js}}.
-
-Full write-up: {{OobeoApp/docs/image-upload-size-study.md}}
-
-h2. Proposed solution
-
-# Single prepare-for-upload helper for all photograph uploads.
-# Always compress using real dimensions (Image.getSize / resizer); target ≤1280px longest side, JPEG quality ~60–70, hard cap ~400–500KB with second-pass recompress.
-# Never upload original on compress failure without user-visible failure / retry.
-# Stop using format videoWidth/Height as photo dimensions.
-# Add before/after size logging (Crashlytics attributes) for backend validation.
-# Tests + QA on Android + iOS with multi-photo visits.
-
-h2. Acceptance criteria
-
-# Uploaded visit/validation photos ≤ agreed max dimension and ~≤500KB typical.
-# No skip of compress due to missing/fake metadata.
-# No silent full-size fallback on compress errors.
-# Midhet confirms sample objects in bucket meet size policy after release.
-
-h2. Severity
-
-S2 High (storage cost, upload timeouts, poor field network UX) — platform-wide.
-```
-
-### Labels / fields (suggested)
-
-| Field | Value |
-|-------|--------|
-| Project | OOB |
-| Type | Story / Bug |
-| Priority | High |
-| Labels | `mobile`, `photos`, `s3`, `performance`, `storage` |
-| Component | Operator App — Photographs |
-| Linked | Backend bucket review (Midhet) |
+This blocked or interrupted navigation through that dev link. It is likely environment/certificate related and not directly related to IFR M2M token wiring, but it affected test flow reliability.
 
 ---
 
-## References
+## Acceptance Criteria Status
 
-- `@bam.tech/react-native-image-resizer` in `package.json`  
-- `FileUploader.js` → `photographs/upload/`  
-- Prior camera work: format selection in `cameraUtils.js` (1080 preference) — necessary but insufficient alone
+- [ ] `DELETE /employee/:id` succeeds and Cognito user is deactivated.
+  - Not validated through web UI. No reachable screen found.
+
+- [ ] `DELETE /person/me` and `DELETE /person/:id` succeed and deactivate Cognito user via outbox.
+  - Not validated through web UI. Current delete-account screen uses `POST /support/delete-account`, not `DELETE /person/me`.
+
+- [ ] `PUT /business/:id/employees/:employeeId` and `POST /business` succeed and set `dWalletId` attribute + org role.
+  - `PUT /business/:id/employees/:employeeId`: not validated through web UI.
+  - `POST /business`: not validated because onboarding/email verification was blocked by `400 Code not found`.
+
+- [ ] `PATCH /person/:id` succeeds and syncs phone number to Cognito, both set and clear cases.
+  - Set/update: partially validated, flow reached OTP step.
+  - Clear: failed via UI, `DELETE /api/bff/phone` returned 500.
+
+- [ ] `POST /auth/phone/verify` succeeds and marks the phone attribute after OTP verification.
+  - Partially validated. OTP screen reached, but successful verification not confirmed.
+
+- [ ] `DELETE /business/:id/employees/:employeeId` succeeds and unsets `dWalletId` + removes org role.
+  - Partially validated. Manage Users screen and user data loaded successfully. Delete action still needs execution and backend/outbox confirmation.
+
+- [ ] `PATCH /employee/:id/role` succeeds and updates employee Cognito group.
+  - Not validated through web UI. No reachable screen found.
+
+- [ ] `POST /employee/:id/restore` succeeds and reactivates Cognito user.
+  - Not validated through web UI. No reachable screen found.
+
+- [ ] `POST /trash/recover/:entityType/:entityId` and `POST /trash/recover/:trashId` succeed and reactivate Cognito user via outbox retry path.
+  - Not validated through web UI. No reachable screen found.
+
+- [ ] Any failures found are logged with request/response details and filed as follow-up bugs.
+  - Failure captured: `DELETE /api/bff/phone` returned 500 / Internal Server Error.
+  - Additional observation: `No X-User-Access-Token header found` response captured.
+  - Additional observation: dev URL certificate issue blocked navigation.
+
+---
+
+## Recommended Follow-Ups
+
+1. File a follow-up bug for `DELETE /api/bff/phone` returning 500 in dev.
+2. Re-test phone verification with a valid OTP to confirm `POST /auth/phone/verify`.
+3. Re-test Business onboarding with a fresh verification code to confirm `POST /business`.
+4. Validate non-web reachable endpoints through API/backend tooling:
+   - `DELETE /employee/:id`
+   - `DELETE /person/me`
+   - `DELETE /person/:id`
+   - `PUT /business/:id/employees/:employeeId`
+   - `PATCH /employee/:id/role`
+   - restore/trash recovery endpoints.
+5. For all outbox-based effects, confirm processing through Ownership outbox logs or database state, since this could not be verified from the browser alone.
