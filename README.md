@@ -1,274 +1,188 @@
-## IFR M2M Token Wiring Validation Report — Web UI Only
-
-### Scope
-
-Validated the IFR user-management call sites that are reachable from the current web applications in the dev environment.
-
-This report intentionally excludes Admin UI / Cognito console validation. Because of that, Cognito side-effects such as group membership, `dWalletId` attributes, phone attributes, and user enabled/disabled state were **not directly verified** here. Those require either Admin UI, Cognito access, Ownership outbox inspection, or backend logs.
-
-### Environment
-
-- Business app: dev environment
-- Personal app: dev environment
-- Validation method: browser UI + DevTools Network
-- No functional code changes were made as part of this validation.
-
----
-
-## Summary
-
-### Reachable Through Web UI
-
-The following catalogue items are reachable from the current web apps:
-
-- `POST /business`
-- `DELETE /business/:id/employees/:employeeId`
-- `PATCH /person/:id` for phone set/update
-- `PATCH /person/:id` for phone clear, via `DELETE /api/bff/phone`
-- `POST /auth/phone/verify`, via `POST /api/bff/phone/verify`
-
-### Not Reachable Through Current Web UI
-
-The following catalogue items were not validated through the web UI because no current screen in this repo appears to trigger them directly:
-
-- `DELETE /employee/:id`
-- `DELETE /person/me`
-- `DELETE /person/:id`
-- `PUT /business/:id/employees/:employeeId`
-- `PATCH /employee/:id/role`
-- `POST /employee/:id/restore`
-- `POST /trash/recover/:entityType/:entityId`
-- `POST /trash/recover/:trashId`
-
-These should be validated separately through direct API calls, backend tooling, Ownership logs, or the internal admin surface.
-
----
-
-## Detailed Results
-
-### Business App — Manage Users
-
-Catalogue coverage:
-
-- `DELETE /business/:id/employees/:employeeId`
-- Expected outbox side-effects:
-  - `UNSET_DWALLET`
-  - `REMOVE_ORG_ROLE`
-
-Screen tested:
-
-- Business app → `/account/users`
-
-Observed:
-
-- The Manage Users screen loaded successfully.
-- The employees/invites data request returned a successful response.
-- The UI displayed the current account administrator and account manager invitation card.
-- Delete and Resend actions were visible for the invite/user card.
-
-Result:
-
-- Precondition confirmed: authenticated Business user can load the user-management screen and fetch user data successfully.
-- Destructive delete action was not confirmed in the provided evidence.
-- Cognito side-effects were not verified because Admin UI/Cognito validation was out of scope.
-
-Status:
-
-- Partially validated from UI.
-- Still needs execution of the delete action and backend/outbox confirmation.
-
----
-
-### Business App — Business Creation / Email Verification Flow
-
-Catalogue coverage:
-
-- `POST /business`
-- Expected outbox side-effects:
-  - `SET_DWALLET`
-  - `ADD_ORG_ROLE`
-
-Screen tested:
-
-- Business account verification/onboarding flow
-
-Observed:
-
-- The email verification screen was reached.
-- Verification failed with:
-  - `400 Bad Request`
-  - `Code not found`
-
-Result:
-
-- The flow did not reach a successful `POST /business` call in the captured evidence.
-- Because the verification code failed, the business creation side-effects could not be validated from UI.
-
-Status:
-
-- Not validated.
-- Blocked by invalid/missing verification code.
-
-Follow-up:
-
-- Retry with a fresh verification code or a test account whose email verification can complete successfully.
-
----
-
-### Personal App — Phone Number Clear
-
-Catalogue coverage:
-
-- `PATCH /person/:id`
-- Expected outbox side-effect:
-  - `DELETE_PHONE_FROM_COGNITO`
-
-Screen tested:
-
-- Personal app → `/profile/phone`
-
-Observed:
-
-- The phone number screen loaded.
-- Removing the phone number triggered an error in the UI:
-  - “Failed to delete phone number. Please try again.”
-- DevTools Network showed the request returning:
-  - `{"error":"Internal Server Error"}`
-
-Expected behavior:
-
-- `DELETE /api/bff/phone` should return 2xx.
-- The BFF should call Ownership `PATCH /person/:id` with:
-  - `phoneNumber: null`
-  - `mfaEnabled: false`
-- Ownership should enqueue/process `DELETE_PHONE_FROM_COGNITO`.
-
-Actual behavior:
-
-- The UI request failed with an internal server error.
-
-Status:
-
-- Failed.
-
-Follow-up bug candidate:
-
-- Investigate why `DELETE /api/bff/phone` returns 500 in dev.
-- Capture server logs for the BFF route and Ownership response.
-- Confirm whether the failure is related to missing/invalid auth headers, M2M token generation, or Ownership-side validation.
-
----
-
-### Personal App — Phone Number Update / OTP Verification
-
-Catalogue coverage:
-
-- `PATCH /person/:id`
-- `POST /auth/phone/verify`
-- Expected side-effects:
-  - `SYNC_PHONE_TO_COGNITO`
-  - `MARK_PHONE_VERIFIED`
-
-Screen tested:
-
-- Personal app → phone update flow
-- OTP verification screen
-
-Observed:
-
-- The user reached the phone verification screen.
-- The request flow included the phone verification endpoint path.
-- OTP verification was not completed in the captured evidence.
-
-Result:
-
-- The UI flow can reach the OTP verification step.
-- Successful `POST /auth/phone/verify` and the Cognito phone verification side-effect were not confirmed.
-
-Status:
-
-- Partially validated.
-- Needs a valid OTP to complete verification and confirm a 2xx response.
-
----
-
-## Additional Observations
-
-### Missing Auth Header Error
-
-One captured network response showed:
-
-```json
-{
-  "ok": false,
-  "statusText": "Error",
-  "error": "No X-User-Access-Token header found",
-  "statusCode": 500
-}
+# dPay Mobile App — Architecture Decision Record
+
+> **Ticket 1 deliverable.** Approved direction for adding the dPay React Native app to `business-dwallet.data-reserve-web`.  
+> Companion docs: `docs/REACT_NATIVE_APP_HANDOFF.md`, `docs/DPAY_POC_API_CONTRACT.md`.
+
+## Decision summary
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| App name | `dpay` | Product name from mocks and POC |
+| App location | `apps/dpay` | Follows split-app pattern (`apps/business`, `apps/personal`) |
+| Framework | **Expo + React Native** | Camera, push, biometrics, fast iteration |
+| Styling | **NativeWind v4** + shared tokens | Tailwind-like classes; cannot reuse web DOM components |
+| Navigation | **Expo Router** | File-based routes, deep links for notifications |
+| State | TanStack Query + Zustand | Matches web patterns |
+| Forms | React Hook Form + Zod | Matches web patterns |
+| i18n | `react-i18next` + `@data-reserve/i18n` | Avoid `next-intl` on mobile |
+| Backend | **Direct to dPay POC gateway** | Not via dWallet web `/api/proxy` |
+| Auth | JWT from gateway + SecureStore | POC uses Bearer JWT, not NextAuth cookies |
+| Biometrics | Expo Local Authentication | Face ID / Touch ID for session unlock |
+
+## Monorepo layout (proposed)
+
+```text
+apps/dpay/                          # Expo React Native app
+packages/mobile-design-tokens/      # Colors, spacing, typography (from web theme)
+packages/mobile-components/         # RN Button, Typography, Screen, NavBar, etc.
+packages/mobile-api-client/         # Gateway client + React Query hooks
+packages/types/                     # Extend with dPay POC types (existing package)
 ```
 
-This should be investigated if it appears on one of the IFR-triggering endpoint calls. It may indicate that a request reached the backend without the expected user access token context.
+Do **not** add mobile code to `packages/web-shell`, `design-system-primitives`, or `dwallet-shared-components` — those remain web/DOM.
 
-Since the IFR change is specifically about M2M token wiring, this should be separated carefully from user-token forwarding issues.
+## Backend integration strategy
 
-### Certificate Warning On Dev Link
+```
+┌─────────────┐     Bearer JWT      ┌──────────────────────┐
+│  apps/dpay  │ ──────────────────► │  dpay-poc-gateway    │
+│  (RN/Expo)  │   /api/auth/*       │  localhost:4020/api  │
+│             │   /api/wallet/*     │  (or drumwave.dev)   │
+└─────────────┘                     └──────────────────────┘
+       │
+       │  NOT used for v1
+       ▼
+┌─────────────────────────┐
+│ business-dwallet-web    │
+│ /api/proxy/ownership    │  ← NextAuth + cookies; wrong model for RN
+└─────────────────────────┘
+```
 
-One browser screen showed a Chrome certificate warning for a `*.drumwave.dev` URL:
+POC clone location: `/Users/mac/Downloads/dpay.dpay-poc-main`
 
-- `NET::ERR_CERT_COMMON_NAME_INVALID`
+Local gateway: `docker compose up` in POC repo → `http://localhost:4020/api`
 
-This blocked or interrupted navigation through that dev link. It is likely environment/certificate related and not directly related to IFR M2M token wiring, but it affected test flow reliability.
+## Screen → API → web reference mapping
 
----
+| # | dPay screen (mock) | Gateway API | Web POC reference | dWallet web reference |
+|---|---|---|---|---|
+| 1 | Push notification | **Gap** — no POC endpoint | — | — |
+| 2 | Login / landing | `POST /auth/login`, `POST /auth/signup` | `dpay-poc-dwallet/src/app/page.tsx` | `LandingPageBR`, `SignInForm` |
+| 3 | Home dashboard | `GET /wallet/me` | `dpay-poc-dwallet/src/app/home/page.tsx` | `PersonalHomePage`, `RequestStatusDisplay`, `ProfileBubbleDataRequestAnimation` |
+| 4 | QR Scan | Parse QR → `GET /wallet/session/:id` | `dpay-poc-dwallet/src/app/scan/page.tsx`, `QrPayScanner.tsx` | `Tabs` (toggle pattern only) |
+| 5 | Show to Pay | **Gap** — no consumer QR display API | — | `PixCard` (QR render + countdown logic only) |
 
-## Acceptance Criteria Status
+## Component reuse matrix
 
-- [ ] `DELETE /employee/:id` succeeds and Cognito user is deactivated.
-  - Not validated through web UI. No reachable screen found.
+| Reuse level | What |
+|---|---|
+| **Direct (types/logic)** | `@data-reserve/types`, `parsePaySessionId` logic, settle payload shapes, i18n strings |
+| **Adapt (visual parity)** | Button, Typography, gradients, stats row, payment source row, bottom nav |
+| **Rebuild (native)** | Camera/scanner, Face ID, push notifications, orbital animation, QR FAB |
+| **Do not import** | Any `packages/design-system-primitives` or `dwallet-shared-components` `.tsx` UI |
 
-- [ ] `DELETE /person/me` and `DELETE /person/:id` succeed and deactivate Cognito user via outbox.
-  - Not validated through web UI. Current delete-account screen uses `POST /support/delete-account`, not `DELETE /person/me`.
+See `docs/REACT_NATIVE_APP_HANDOFF.md` for full reuse boundaries.
 
-- [ ] `PUT /business/:id/employees/:employeeId` and `POST /business` succeed and set `dWalletId` attribute + org role.
-  - `PUT /business/:id/employees/:employeeId`: not validated through web UI.
-  - `POST /business`: not validated because onboarding/email verification was blocked by `400 Code not found`.
+## Auth & Face ID flow
 
-- [ ] `PATCH /person/:id` succeeds and syncs phone number to Cognito, both set and clear cases.
-  - Set/update: partially validated, flow reached OTP step.
-  - Clear: failed via UI, `DELETE /api/bff/phone` returned 500.
+```
+App launch
+  ├─ No stored token → Login screen
+  ├─ Stored token + biometrics enabled → Face ID prompt
+  │     ├─ Success → load GET /auth/me → Home
+  │     └─ Fail → Login screen (password fallback)
+  └─ Stored token + biometrics off → GET /auth/me → Home
 
-- [ ] `POST /auth/phone/verify` succeeds and marks the phone attribute after OTP verification.
-  - Partially validated. OTP screen reached, but successful verification not confirmed.
+Login success
+  └─ Store token in SecureStore
+  └─ Optionally enable biometrics (device capability check)
+```
 
-- [ ] `DELETE /business/:id/employees/:employeeId` succeeds and unsets `dWalletId` + removes org role.
-  - Partially validated. Manage Users screen and user data loaded successfully. Delete action still needs execution and backend/outbox confirmation.
+POC web stores token in `localStorage` (`dpay_token`, `dpay_user`). Mobile equivalent:
 
-- [ ] `PATCH /employee/:id/role` succeeds and updates employee Cognito group.
-  - Not validated through web UI. No reachable screen found.
+- `SecureStore`: `dpay_token`, `dpay_user` (JSON), `dpay_biometric_enabled`
 
-- [ ] `POST /employee/:id/restore` succeeds and reactivates Cognito user.
-  - Not validated through web UI. No reachable screen found.
+**No Cognito / NextAuth / Ownership API for v1** — dPay POC uses its own JWT auth against Postgres.
 
-- [ ] `POST /trash/recover/:entityType/:entityId` and `POST /trash/recover/:trashId` succeed and reactivate Cognito user via outbox retry path.
-  - Not validated through web UI. No reachable screen found.
+## Native capabilities
 
-- [ ] Any failures found are logged with request/response details and filed as follow-up bugs.
-  - Failure captured: `DELETE /api/bff/phone` returned 500 / Internal Server Error.
-  - Additional observation: `No X-User-Access-Token header found` response captured.
-  - Additional observation: dev URL certificate issue blocked navigation.
+| Capability | Library (proposed) | Ticket |
+|---|---|---|
+| Camera + QR scan | `expo-camera` + `expo-barcode-scanner` (or `react-native-vision-camera`) | 7 |
+| QR display | `react-native-qrcode-svg` | 8 |
+| Face ID | `expo-local-authentication` | 3 |
+| Push notifications | `expo-notifications` | 9 |
+| Secure storage | `expo-secure-store` | 3 |
 
----
+Web POC scanner uses browser `BarcodeDetector` API (`QrPayScanner.tsx`) — not portable to RN; must use native modules.
 
-## Recommended Follow-Ups
+## Design tokens strategy
 
-1. File a follow-up bug for `DELETE /api/bff/phone` returning 500 in dev.
-2. Re-test phone verification with a valid OTP to confirm `POST /auth/phone/verify`.
-3. Re-test Business onboarding with a fresh verification code to confirm `POST /business`.
-4. Validate non-web reachable endpoints through API/backend tooling:
-   - `DELETE /employee/:id`
-   - `DELETE /person/me`
-   - `DELETE /person/:id`
-   - `PUT /business/:id/employees/:employeeId`
-   - `PATCH /employee/:id/role`
-   - restore/trash recovery endpoints.
-5. For all outbox-based effects, confirm processing through Ownership outbox logs or database state, since this could not be verified from the browser alone.
+Extract from:
+
+- `design-system.shared-components-web/tailwind.config` (preset)
+- `packages/dwallet-shared-components/src/constants/colorTokens.ts`
+- dPay POC gradients in `dpay-poc-dwallet` (e.g. `#4700ff`, `#070707` backgrounds)
+
+Create `packages/mobile-design-tokens` as single source, consumed by NativeWind config in `apps/dpay`.
+
+Key dPay visual tokens from POC:
+
+```css
+/* Personal avatar / accent gradient */
+radial-gradient(100.27% 100.27% at 26.43% 94.29%, #4700ff 0%, #2f3367 76.61%, #4700ff 99.99%)
+
+/* Background */
+#070707
+```
+
+## First vertical slice (MVP)
+
+Recommended implementation order for Tickets 2–10:
+
+1. Bootstrap app + tokens + API client
+2. Login screen (gateway auth)
+3. Face ID unlock
+4. Home screen (`GET /wallet/me`)
+5. QR Scan → session review → settle
+6. Show to Pay UI shell (blocked on backend gap unless mocked)
+7. Push notifications (blocked on backend gap unless local-only demo)
+
+## Known gaps / follow-up tickets (backend)
+
+| Gap | Impact | Suggested owner |
+|---|---|---|
+| No consumer “Show to Pay” QR generation API | Mock #5 cannot be fully functional | `dpay-poc-gateway` team |
+| No push notification registration API | Mock #1 cannot be end-to-end | `dpay-poc-gateway` or platform team |
+| Payments require savings plans (not main wallet balance) | Home “Paying from” must show plan balances | Already in POC — document in UX |
+| No integration with Ownership/Cognito | dPay RN is separate from dWallet web auth | By design for POC |
+
+## Turbo / pnpm integration (Ticket 2 prep)
+
+Add to root `package.json`:
+
+```json
+"dev:dpay": "pnpm --filter dpay dev",
+"lint:dpay": "pnpm --filter dpay lint"
+```
+
+Workspace entry: `apps/dpay/package.json` with name `@data-reserve/dpay` or `dpay-mobile`.
+
+## Security constraints
+
+- JWT stored in SecureStore only
+- No `JWT_SECRET` in mobile bundle
+- No merchant credentials in consumer app
+- Certificate pinning: evaluate for production (out of POC scope)
+- Biometrics unlocks stored session — does not replace server auth on token expiry
+
+## Open questions for team review
+
+1. Should dPay RN live in **this repo** or **dpay.dpay-poc-main** monorepo?
+   - **Recommendation:** This repo for shared types/i18n; gateway stays in POC repo.
+2. Should Show to Pay wait for new gateway API or ship Scan-only MVP first?
+   - **Recommendation:** Scan-only MVP first.
+3. Reuse dWallet Personal branding on login or dPay-specific branding?
+   - **Recommendation:** Mocks show “dWallet. PERSONAL” on login and dPay in notifications — confirm with design.
+4. Connect to deployed gateway (`drumwave.dev`) or local Docker only for dev?
+   - **Recommendation:** Both via `DPAY_GATEWAY_URL` env switch.
+
+## Approval checklist (Ticket 1)
+
+- [x] POC gateway endpoints catalogued → `docs/DPAY_POC_API_CONTRACT.md`
+- [x] Mobile architecture decisions documented → this file
+- [x] Reuse vs rebuild matrix defined → `docs/REACT_NATIVE_APP_HANDOFF.md` + tables above
+- [x] Backend gaps identified (Show to Pay, push)
+- [x] First vertical slice defined
+- [ ] Team review / sign-off
+- [ ] Jira epic linked
