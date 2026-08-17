@@ -1,63 +1,74 @@
-# EnforcePlus Codebase Check — production-v3 `/visits/` Polling Spike Report
+# OobeoApp hardcoded secrets
 
-**Date:** 2026-08-12  
-**Checked repository:** EnforcePlus officer app (`enforceplus`, React Native)  
-**Source report:** production-v3 `/visits/` polling spike — investigation report (2026-08-06 to 2026-08-10)  
-**Audience of original report:** mobile (`oob_app_5`) and backend (`oob_web`) developers  
-**Purpose of this note:** Confirm whether the patterns / bugs described in that report exist in the EnforcePlus app today  
+**Type:** Bug / Security  
+**Priority:** Critical  
+**Component:** OobeoApp (React Native)  
+**Labels:** security, hardcoded-secret, technical-debt
 
----
+## Summary
 
-## Verdict
+OobeoApp ships multiple live credentials hardcoded in source and native config, rather than injected via secure runtime / build-time config. All of them are already in git history and several are extractable from a decompiled APK/IPA. The first find was a PlateRecognizer ALPR token in `LicenseScanner.js`; a follow-up scan of the same repo found additional secrets of equal or higher severity, including a Firebase Admin private key and the Android release keystore plus its passwords.
 
-**None of the `/visits/` polling mechanisms or related bugs described in the investigation report exist in the EnforcePlus codebase.**
+## Details
 
-The original report concerns **OobeoApp** (valet / board mobile client) and **oobeo_api** (web/API backend), not EnforcePlus (parking enforcement officer app).
+**Discovered:** during an unrelated migration-analysis exploration of the OobeoApp codebase, then confirmed with a full-repo secrets scan on 2026-08-17.
 
----
+The original ticket asked to follow “the existing pattern” of `react-native-dotenv` + EAS build-time env injection, consistent with `app/constants.js`. That pattern is only half-implemented today:
 
-## Scope of search
+- `react-native-dotenv` is installed and wired in `babel.config.js`.
+- `app/constants.js` has `// const target = TARGET;` commented out and hardcodes `const target = 'production'`.
+- `OobeoApp/.env` is **committed** and is **not** in `.gitignore`. It currently only contains `TARGET=local`. Any new secret written there will leak again.
+- `eas.json` only injects `TARGET` and Square application IDs (public identifiers).
 
-Searched the EnforcePlus repo for:
+Hardcoded credentials confirmed in tree (values truncated — do not paste full secrets into tickets, Slack, or git):
 
-- `/visits/`, `keywordType=status`, `visitalertsV2`
-- `parkedPoller`, `requestedPoller`, `readyPoller`, `reservationsPoller`, `alertPoller`
-- `getAllCars`, `createActivity`, `swimlaneInterval`
-- `requestahead`, Pusher / `pusherEvents`
-- `stopAlertPoller`, `useTabs`, `carsData.js`
-- Related terms: `oobeo`, `valet`, `swimlane`
-
-Also scanned `src/` for polling patterns (`setInterval`, pollers, Pusher).
-
----
-
-## Findings matrix
-
-| Item from investigation report | Present in EnforcePlus? | Notes |
+| Secret | File(s) | What it is |
 |---|---|---|
-| `/visits/` board-refresh polling | **No** | No references to `/visits/` or status-poll query shapes |
-| Three swimlane pollers (`parked` / `requested` / `ready`) | **No** | Not found |
-| `getAllCars(true)` after every activity | **No** | Not found |
-| RequestAhead Pusher fan-out → REST refetch | **No** | No Pusher client usage found |
-| Missing `stopAlertPoller()` on app background | **No** | File/pattern does not exist here |
-| `swimlaneInterval` (60s backend constant) | **No** | Not found |
-| Event 1 ALB `/visits/*` cutover to v4 | **N/A** | Infra/routing; not EnforcePlus app code |
-| Event 2 unexplained `/visits/` volume gap | **N/A** | Applies to OobeoApp + production-v3 traffic, not this app |
+| PlateRecognizer API token | `app/components/LicenseScanner.js` | `Authorization: Token b5ccb6f1...` on `https://api.platerecognizer.com/v1/plate-reader/` |
+| Firebase Admin SDK private key | `OobeoApp/oobeo-valetware-firebase-adminsdk-icgk0-4d28c6a06c.json` | Server service-account key for `firebase-adminsdk-icgk0@oobeo-valetware.iam.gserviceaccount.com`. Not used by the mobile app at runtime — should never have been in this repo. |
+| Android release keystore + passwords | `android/app/keystore.jks` (tracked; `.gitignore` has `*.keystore` but not `*.jks`); `android/gradle.properties` (`MYAPP_RELEASE_STORE_PASSWORD` / `MYAPP_RELEASE_KEY_PASSWORD` = `9u2dxfpvaa1...`) | Full Play-signing material. `build.gradle` release signing reads these properties. |
+| OAuth client id + secret | `app/constants.js` (`API_CLIENT_ID: 'Xav3ui75y7uZJ20v...'`, `API_CLIENT_SECRET: '8Pt5JQjJb3TUGPCi...'`) | Password-grant client used in `app/actions/userData.js` for login and token refresh. |
+| Airship app secrets | `ios/AirshipConfig.plist`; `android/app/src/main/assets/airshipconfig.properties` (`NySOJCGY...`, `EGQz_0TR...`) | Production and development app key + app secret. |
+| Square Reader SDK Maven password | `android/gradle.properties` (`SQUARE_READER_SDK_REPOSITORY_PASSWORD=boypbcwa5sfo...`) | Download credential for Square’s private artifact repo (not a payment token). The Square application id next to it is a public identifier. |
 
----
+Out of scope for this ticket (public by design — restrict in the vendor console if needed, do not treat as secrets):
 
-## What EnforcePlus *does* poll
+- Pusher client keys in `app/constants.js`
+- Square application ids in `eas.json` / `build.gradle`
+- Bugsnag `apiKey` in `Info.plist` / `AndroidManifest.xml`
+- Firebase/Google client `AIza...` keys in `google-services.json` / `GoogleService-Info.plist`
+- Standard Android `debug.keystore` + password `android`
 
-The only notable recurring timer found in app JS is in `src/App.js`: a **60-second interval** that checks expired **watch alerts** (local notification / watch-list logic). That path is unrelated to `/visits/` board polling and would not drive the production-v3 ASG spike described in the report.
+## Risk
 
-EnforcePlus otherwise uses Firebase (Firestore listeners, Storage, etc.) for enforcement workflows (scan, whitelist, citations, violations)—not the Oobeo valet `/visits/` API.
+- Every item above is already in git history, so rotation alone is not sufficient — the exposure predates any fix.
+- Anyone with source or build access (including a decompiled release APK/IPA) can extract client-side tokens (PlateRecognizer, OAuth client secret, Airship secrets) and reuse them.
+- The Firebase Admin JSON is a **server** credential: repo access is enough to act as admin on project `oobeo-valetware` (Auth, Firestore, Storage, etc.).
+- The release keystore **and** its passwords together allow signing APKs as `com.oobeo.valet`.
+- The Square Maven password allows pulling Reader SDK artifacts under this account.
+- Writing replacements into the committed `.env` would create a new leak.
 
----
+## Acceptance Criteria
 
-## Conclusion
+- All hardcoded secrets listed above are removed from source, native config, and git tracking (`LicenseScanner.js`, `constants.js`, `gradle.properties`, `keystore.jks`, Airship plist/properties, Firebase Admin JSON).
+- Secrets are sourced from secure runtime / build-time config instead:
+  - JS secrets (PlateRecognizer token, `API_CLIENT_ID`, `API_CLIENT_SECRET`, `TARGET`): finish `react-native-dotenv` + EAS env injection; re-enable `import { TARGET } from '@env'`.
+  - Android signing + Square Maven password: EAS secrets / CI env / uncommitted `~/.gradle/gradle.properties`.
+  - Airship: EAS env / Xcode build settings / generated gitignored `airshipconfig.properties`.
+  - Firebase Admin JSON: do not ship in this repo at all; keep only in the backend/CI secret store if still needed.
+- `.gitignore` updated for `.env`, `*.jks`, `*firebase-adminsdk*.json`, and `*-adminsdk-*.json`. Commit only `.env.example` with empty placeholders.
+- No plaintext secret remains anywhere in the diff or in new config files committed to the repo.
+- Vendor-side rotation (cannot be done from the codebase alone — flag to each vendor-account owner):
+  - PlateRecognizer: revoke/rotate the exposed token; provision the new token only via env.
+  - Firebase: disable/delete the leaked service account; issue a new one only to the backend/CI secret store.
+  - Play Console: if Play App Signing is in use, rotate the upload key (keep the Play-held app key); otherwise enroll in Play App Signing and rotate the upload key.
+  - API/Django: revoke/rotate the OAuth client; provision the new pair only via EAS/CI secrets.
+  - Airship: rotate production and development app secrets; provision only via the secure config path.
+  - Square: rotate the Reader SDK repository password; provision only via the secure config path.
+- Confirm a staging build still works for: license-plate scan, login + token refresh, Android signing/install, push notifications, and Square Reader SDK dependency resolution.
 
-- **Do not treat EnforcePlus as in-scope** for the Aug 7 / Aug 8 `/visits/` polling spike remediation.
-- Confirmed mobile fixes from the report (e.g. `stopAlertPoller()` in `useTabs.js`, reducing `getAllCars` refetch fan-out, Pusher payload consumption, session/install ID on API requests) belong in the **OobeoApp** repository (`OobeoApp/app/...`), not here.
-- Backend / ALB recommendations remain with **oob_web** / infra as stated in the original report.
+## Notes
 
----
+Suggested order of vendor rotation (highest blast radius first): Firebase Admin → Android keystore / Play upload key → OAuth client → Airship → Square Maven password → PlateRecognizer.
+
+Mobile OAuth secrets remain extractable from a binary even after env injection. Rotation + env injection stops **repo** leakage; a follow-up should move this app to a public client / PKCE and keep the confidential client on the server only.
