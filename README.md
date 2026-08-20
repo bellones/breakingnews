@@ -115,69 +115,50 @@ Do not invent paths. Ship gateway first, then the mobile wires in the same ticke
 
 ---
 
-## 5. CI/CD (Fastlane)
+## 5. CI/CD (Fastlane) — three tickets
 
 CI today is static only (typecheck / lint / test). Native `ios/` already exists (`com.drumwave.dpay`, team `BCPQ5494A7`). Device installs are local Xcode (Drumwave PLA / personal-team workaround).
 
 **Decision:** ship and sign with **Fastlane** (`match` + `gym` + `pilot`), not EAS Build. Expo stays the app framework; Fastlane owns archive and store upload.
 
-### Fastlane iOS (match + gym + pilot)
+### 1 — Apple signing / PLA / devices
 
 **Description**  
-Add `fastlane/` (Gemfile, `Fastfile`, `Appfile`, `Matchfile`). Lanes:
+Unblock Drumwave signing before any Fastlane lane.
 
-- `ios build` — `gym` Debug/Release from `ios/dPay.xcworkspace` / scheme `dPay`
-- `ios beta` — `match` (appstore) → `gym` → `pilot` (TestFlight)
-- `ios certificates` — `match` development + appstore for team `BCPQ5494A7`
+- Account Holder accepts the current Program License Agreement
+- Register physical devices on team `BCPQ5494A7`
+- Decide match storage (git repo or S3) and App Store Connect API key
 
-Use existing bundle id `com.drumwave.dpay`. Do not switch CI to the personal team.
+Without this, `expo run:ios --device`, `gym`, and `pilot` fail. Personal team is a local workaround only — do not use it in CI.
 
-**Dependencies:** Apple signing / PLA / devices. Match repo or S3 + App Store Connect API key in GitHub secrets.
+**Dependencies:** none. Blocks the two tickets below.
 
 ---
 
-### CI: Fastlane build on GitHub Actions
+### 2 — Fastlane iOS CI/CD (match + gym + TestFlight)
 
 **Description**  
-`macos` job on PR and/or `main`: `pnpm install` → `pod install` → `bundle exec fastlane ios build` (or `ios beta` on `main`). Cache Pods / DerivedData. Keep the existing static-checks job.
+One ticket for lanes + GitHub Actions + TestFlight:
 
-**Dependencies:** Fastlane iOS ticket + signing secrets (`MATCH_PASSWORD`, `APP_STORE_CONNECT_API_KEY`, match git URL).
+- Add `fastlane/` (Gemfile, `Fastfile`, `Appfile`, `Matchfile`). Bundle id `com.drumwave.dpay`.
+  - `ios build` — `gym` from `ios/dPay.xcworkspace` / scheme `dPay`
+  - `ios beta` — `match` (appstore) → `gym` → `pilot`
+  - `ios certificates` — `match` development + appstore for `BCPQ5494A7`
+- `macos` job: `pnpm install` → `pod install` → `fastlane ios build` on PR; `fastlane ios beta` on `main`. Keep the existing static-checks job. Cache Pods / DerivedData.
+- Secrets: `MATCH_PASSWORD`, `APP_STORE_CONNECT_API_KEY`, match git/S3 URL.
+- CodeArtifact auth on Actions only if `pnpm install --frozen-lockfile` starts failing (workspace `@data-reserve/*` does not need it today).
+
+**Dependencies:** Apple signing / PLA / devices.
 
 ---
 
-### CD: TestFlight via Fastlane
+### 3 — Android Fastlane / Play internal (optional)
 
 **Description**  
-On merge to `main`, run `fastlane ios beta` and upload to TestFlight (`pilot`). Internal testers get a build without local Xcode.
+If Android is v1: Fastlane `gradle` + `supply` (or `upload_to_play_store`) for an internal track, same lane conventions as iOS. Product: iOS-only v1 vs both.
 
-**Dependencies:** Fastlane iOS + CI job + signing.
-
----
-
-### Apple signing / PLA / devices
-
-**Description**  
-Account Holder accepts the current Program License Agreement. Register devices and let `match` create/sync profiles for `BCPQ5494A7`. Without this, `expo run:ios --device` and Fastlane `gym`/`pilot` fail (personal team is a local workaround only).
-
-**Dependencies:** none. Blocks Fastlane iOS + TestFlight.
-
----
-
-### CI: CodeArtifact (only if needed)
-
-**Description**  
-Add registry auth to GitHub Actions if `pnpm install --frozen-lockfile` starts failing on private packages. Workspace packages (`@data-reserve/*`) do not need this today.
-
-**Dependencies:** only if CI install breaks.
-
----
-
-### Android Fastlane / Play internal (optional)
-
-**Description**  
-If Android is v1: Fastlane `gradle` + `supply` (or `upload_to_play_store`) for an internal track. Product: iOS-only v1 vs both.
-
-**Dependencies:** Fastlane iOS first (same lane conventions). Product decision.
+**Dependencies:** Fastlane iOS CI/CD. Product decision.
 
 ---
 
@@ -200,8 +181,7 @@ Wire GET /wallet/me on Home
 dPay live pay (settle + confirmation + receipt)
 Show to Pay consumer QR (POC + mobile)
 Push register/send and password reset (POC + mobile)
-Fastlane iOS (match + gym + pilot)
-CI: Fastlane build on GitHub Actions
-CD: TestFlight via Fastlane
 Apple signing / PLA / devices
+Fastlane iOS CI/CD (match + gym + TestFlight)
+Android Fastlane / Play internal (optional)
 ```
