@@ -26,68 +26,30 @@ CI today: `.github/workflows/ci.yml` (install + typecheck + lint + test on PR/`m
 
 1. UI polish leftovers (no backend)
 2. Wire existing gateway APIs (wallet, settle, confirmation, history)
-3. EAS + CI preview + TestFlight
+3. Fastlane + GitHub Actions (build → TestFlight)
 4. New gateway endpoints in `dpay.dpay-poc-main`, then mobile follow-ups
 
 ---
 
 ## 1. UI polish
 
-### dPay Home polish (rest of screen)
+### dPay remaining screen polish
 
 **Description**  
-Finish Home against PdW 18. Header (Drumwave orb + frosted bar) is already DWLLT-3169. Align title/subtitle, `StatsRow`, CTAs, orbit, and bottom nav with Figma.
+Single Figma pass for everything DWLLT-3169 did **not** cover. Landing wordmark / `PERSONAL` / Sign in and the Home header (Drumwave orb + frosted bar) stay out — they are already shipped.
 
-**Out of scope:** `GET /wallet/me` (separate ticket).
+Include all of:
 
-**Dependencies:** DWLLT-3169
+- **Home (rest):** title/subtitle, `StatsRow`, CTAs, orbit, bottom nav
+- **Login:** form, wordmark, Face ID row, typography
+- **Scan to Pay:** “QR code” header, Scan / Show tabs, camera viewport + frame, spinner, invalid/error/retry
+- **Show to Pay:** white QR card, countdown, cashier hint, Paying from / `Fund` row (payload stays mocked)
+- **Confirmation:** success orb, display title, order-details card, “Show my receipt” CTA (fields stay mocked)
+- **Inverse `Button` default:** promote landing Sign in type (Titillium Semibold 18px, tracking `-0.72px`, `#070707`) so Home / login / confirmation do not need per-screen `labelClassName`
 
----
+**Out of scope:** `GET /wallet/me`, settle, live confirmation mapping, consumer QR API.
 
-### dPay Login polish
-
-**Description**  
-Match `/login` to Figma (form, wordmark, Face ID row, typography). Landing Sign in already uses Titillium 18 / `#070707` via `labelClassName`. Login still uses the default `Button` label.
-
-**Dependencies:** DWLLT-3169
-
----
-
-### dPay Scan to Pay polish
-
-**Description**  
-Figma pass on `/pay/scan`: “QR code” header, Scan / Show tabs, camera viewport + frame, spinner, invalid/error/retry states.
-
-**Out of scope:** settle / live confirmation mapping.
-
-**Dependencies:** DWLLT-3096
-
----
-
-### dPay Show to Pay polish
-
-**Description**  
-Figma pass on the Show tab: white QR card, countdown, cashier hint, Paying from / `Fund` row. Payload stays mocked until the consumer QR API exists.
-
-**Dependencies:** DWLLT-3097
-
----
-
-### dPay Confirmation polish
-
-**Description**  
-Figma pass on `/pay/confirmation`: success orb, display title, order-details card, “Show my receipt” CTA. Receipt fields stay mocked until settle/receipt wiring.
-
-**Dependencies:** DWLLT-3157
-
----
-
-### dPay inverse Button default (optional)
-
-**Description**  
-Promote landing Sign in typography (Titillium Semibold 18px, tracking `-0.72px`, `#070707`) to all `variant="inverse"` buttons so Home / login / confirmation match without per-screen `labelClassName`.
-
-**Dependencies:** DWLLT-3169
+**Dependencies:** DWLLT-3169, DWLLT-3094, DWLLT-3096, DWLLT-3097, DWLLT-3157
 
 ---
 
@@ -129,7 +91,7 @@ Stop using `generateMockPurchaseConfirmation()` (Coupa Cafe / `$3.25` / `Ð0.12`
 **Description**  
 “Show my receipt” today goes to `/requests` placeholder. Use `GET /wallet/transactions` (mapper already in `mapTransactionHistory`) and optionally `GET /wallet/ledger/:id`. Add ledger to `GatewayClient` only if the screen needs it.
 
-**Dependencies:** Product: list vs single receipt. Confirmation polish optional.
+**Dependencies:** Product: list vs single receipt. Remaining screen polish optional.
 
 ---
 
@@ -196,9 +158,9 @@ Replace `generateMockShowToPay()` with the consumer QR API. Keep 5:00 refresh if
 ### Wire remote push
 
 **Description**  
-Call register/send instead of SecureStore-only + local Coupa demo. Real Expo tokens need an EAS `projectId` and a dev/prod build (not Expo Go).
+Call register/send instead of SecureStore-only + local Coupa demo. Real Expo push tokens still need an EAS `projectId` (push only — builds stay on Fastlane) and a signed dev/prod binary (not Expo Go).
 
-**Dependencies:** Push register/send + EAS project ticket.
+**Dependencies:** Push register/send + Fastlane iOS build (or a local signed binary).
 
 ---
 
@@ -211,43 +173,51 @@ Add the Reset control on `/login` once the auth endpoint exists.
 
 ---
 
-## 5. CI/CD
+## 5. CI/CD (Fastlane)
 
-CI today is static only. There is **no** `eas.json`. Device installs today are local Xcode (Drumwave team PLA / personal team workaround).
+CI today is static only (typecheck / lint / test). Native `ios/` already exists (`com.drumwave.dpay`, team `BCPQ5494A7`). Device installs are local Xcode (Drumwave PLA / personal-team workaround).
 
-### EAS project + eas.json
+**Decision:** ship and sign with **Fastlane** (`match` + `gym` + `pilot`), not EAS Build. Expo stays the app framework; Fastlane owns archive and store upload.
+
+### Fastlane iOS (match + gym + pilot)
 
 **Description**  
-Create the Expo/EAS project, add `eas.json` (`development` / `preview` / `production`), set `projectId` in `app.config.ts`. Required for remote push tokens and any cloud build.
+Add `fastlane/` (Gemfile, `Fastfile`, `Appfile`, `Matchfile`). Lanes:
 
-**Dependencies:** none (unblocks push + preview builds).
+- `ios build` — `gym` Debug/Release from `ios/dPay.xcworkspace` / scheme `dPay`
+- `ios beta` — `match` (appstore) → `gym` → `pilot` (TestFlight)
+- `ios certificates` — `match` development + appstore for team `BCPQ5494A7`
+
+Use existing bundle id `com.drumwave.dpay`. Do not switch CI to the personal team.
+
+**Dependencies:** Apple signing / PLA / devices. Match repo or S3 + App Store Connect API key in GitHub secrets.
 
 ---
 
-### CI: EAS preview build
+### CI: Fastlane build on GitHub Actions
 
 **Description**  
-On PR or `main`, run `eas build` (iOS first). Distribute an internal install so reviewers are not blocked on local signing.
+`macos` job on PR and/or `main`: `pnpm install` → `pod install` → `bundle exec fastlane ios build` (or `ios beta` on `main`). Cache Pods / DerivedData. Keep the existing static-checks job.
 
-**Dependencies:** EAS project + Apple team / PLA / device registration.
+**Dependencies:** Fastlane iOS ticket + signing secrets (`MATCH_PASSWORD`, `APP_STORE_CONNECT_API_KEY`, match git URL).
 
 ---
 
-### CD: TestFlight (and Play later)
+### CD: TestFlight via Fastlane
 
 **Description**  
-Submit the production/preview profile to TestFlight after merge to `main`. Android Play internal is a follow-up if Android is v1.
+On merge to `main`, run `fastlane ios beta` and upload to TestFlight (`pilot`). Internal testers get a build without local Xcode.
 
-**Dependencies:** EAS preview build + signing.
+**Dependencies:** Fastlane iOS + CI job + signing.
 
 ---
 
 ### Apple signing / PLA / devices
 
 **Description**  
-Account Holder accepts the current Program License Agreement. Register physical devices on team `BCPQ5494A7`. Without this, Drumwave-signed `expo run:ios --device` and EAS iOS fail (personal team is a local workaround only).
+Account Holder accepts the current Program License Agreement. Register devices and let `match` create/sync profiles for `BCPQ5494A7`. Without this, `expo run:ios --device` and Fastlane `gym`/`pilot` fail (personal team is a local workaround only).
 
-**Dependencies:** none. Blocks CI iOS + TestFlight.
+**Dependencies:** none. Blocks Fastlane iOS + TestFlight.
 
 ---
 
@@ -260,12 +230,12 @@ Add registry auth to GitHub Actions if `pnpm install --frozen-lockfile` starts f
 
 ---
 
-### Android first-class / Play internal (optional)
+### Android Fastlane / Play internal (optional)
 
 **Description**  
-Treat Android as a v1 target: EAS Android profile, emulator/device runbook, Play internal track.
+If Android is v1: Fastlane `gradle` + `supply` (or `upload_to_play_store`) for an internal track. Product: iOS-only v1 vs both.
 
-**Dependencies:** EAS project. Product: iOS-only v1 vs both.
+**Dependencies:** Fastlane iOS first (same lane conventions). Product decision.
 
 ---
 
@@ -283,12 +253,7 @@ Treat Android as a v1 target: EAS Android profile, emulator/device runbook, Play
 ## Copy-paste titles
 
 ```text
-dPay Home polish (rest of screen)
-dPay Login polish
-dPay Scan to Pay polish
-dPay Show to Pay polish
-dPay Confirmation polish
-dPay inverse Button default
+dPay remaining screen polish
 Wire GET /wallet/me on Home
 Settle after scan claim
 Confirmation from settle / transaction
@@ -301,8 +266,8 @@ Session WebSocket (optional)
 Wire Show to Pay to gateway
 Wire remote push
 Reset password UI
-EAS project + eas.json
-CI: EAS preview build
-CD: TestFlight
+Fastlane iOS (match + gym + pilot)
+CI: Fastlane build on GitHub Actions
+CD: TestFlight via Fastlane
 Apple signing / PLA / devices
 ```
