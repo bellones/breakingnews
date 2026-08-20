@@ -25,9 +25,9 @@ CI today: `.github/workflows/ci.yml` (install + typecheck + lint + test on PR/`m
 ## Suggested order
 
 1. UI polish leftovers (no backend)
-2. Wire existing gateway APIs (wallet, settle, confirmation, history)
+2. Live pay (settle + confirmation + receipt)
 3. Fastlane + GitHub Actions (build → TestFlight)
-4. New gateway endpoints in `dpay.dpay-poc-main`, then mobile follow-ups
+4. Show to Pay QR (POC + mobile) and push / reset password (POC + mobile)
 
 ---
 
@@ -53,9 +53,11 @@ Include all of:
 
 ---
 
-## 2. Backend integration — mobile (gateway already exists)
+## 2. Backend — three tickets
 
-Client already has `getWallet` / `getTransactions`. Home does not call them. `useWalletQueries` and `mapTransactionHistory` exist. **Settle is not on `GatewayClient`.**
+Client already has `getWallet` / `getTransactions`. Home does not call them. `useWalletQueries` and `mapTransactionHistory` exist. **Settle is not on `GatewayClient`.** Do **not** invent new paths.
+
+`GET /wallet/me` stays its own small ticket (not in the three below).
 
 ### Wire GET /wallet/me on Home
 
@@ -66,110 +68,50 @@ Render wallet / plan balances from `GET /wallet/me` instead of only `mockHome.ts
 
 ---
 
-### Settle after scan claim
+### 1 — dPay live pay (settle + confirmation + receipt)
+
+**Repos:** `dwallet.dpay-mobile` (and POC only if settle/tx cannot fill the confirmation card).
 
 **Description**  
-Add `settleSession` → `POST /wallet/session/:id/settle`. After a live `GET /wallet/session/:id` claim, settle (auto vs plan-picker / review is a product decision). Mock scan may keep the 2s demo until confirmation uses real data.
+Close the live Scan → pay → receipt path in one ticket:
 
-**Do not** invent new paths. Settle body is already in the API contract (`plan` / `plans` / `external`). `{ source: "wallet" }` is rejected.
+- Add `settleSession` → `POST /wallet/session/:id/settle` after a live claim. Body is already in the contract (`plan` / `plans` / `external`). `{ source: "wallet" }` is rejected. Product: auto-settle vs plan-picker / review.
+- Stop `generateMockPurchaseConfirmation()` (Coupa Cafe / `$3.25` / `Ð0.12`). Map vendor, tx id, method, amount, data value from settle and/or `GET /wallet/transactions` / ledger.
+- “Show my receipt” leaves `/requests`. Use `GET /wallet/transactions` (`mapTransactionHistory` exists). Add `GET /wallet/ledger/:id` to the client only if the screen needs it.
+- Receipt DTO: **reuse settle + tx/ledger**. Open a POC endpoint only if those shapes are not enough — do not guess a path.
 
-**Dependencies:** DWLLT-3096. Product: review vs auto-settle.
+**Out of scope:** session WebSocket (`EXPO_PUBLIC_DPAY_WS_URL`). Navigate after settle; WS later if needed.
+
+**Dependencies:** DWLLT-3096, DWLLT-3157. Product: review vs auto-settle; list vs single receipt.
 
 ---
 
-### Confirmation from settle / transaction
+### 2 — Show to Pay consumer QR (POC + mobile)
+
+**Repos:** `dpay.dpay-poc-main` first, then `dwallet.dpay-mobile`.
 
 **Description**  
-Stop using `generateMockPurchaseConfirmation()` (Coupa Cafe / `$3.25` / `Ð0.12`). Map vendor, tx id, method, amount, data value from settle response or `GET /wallet/transactions` / ledger.
+POC is merchant-presented QR only. Add an endpoint to create/refresh a **customer-presented** display QR + `expiresAt`. Then replace `generateMockShowToPay()` on the Show tab. Keep a ~5:00 refresh if the backend returns `expiresAt`.
 
-**Dependencies:** Settle ticket, **or** gateway receipt DTO if settle/tx is not enough.
+Until the endpoint exists, Show to Pay stays mocked. Do not add a guessed path to `GatewayClient`.
+
+**Dependencies:** DWLLT-3097. Backend before mobile wire.
 
 ---
 
-### Transaction history / receipt destination
+### 3 — Push register/send and password reset (POC + mobile)
+
+**Repos:** `dpay.dpay-poc-main` first, then `dwallet.dpay-mobile`.
 
 **Description**  
-“Show my receipt” today goes to `/requests` placeholder. Use `GET /wallet/transactions` (mapper already in `mapTransactionHistory`) and optionally `GET /wallet/ledger/:id`. Add ledger to `GatewayClient` only if the screen needs it.
+Two remaining auth/notify gaps, same ticket:
 
-**Dependencies:** Product: list vs single receipt. Remaining screen polish optional.
+- **Push:** register/unregister Expo device token and send `{ deepLink, merchantName, sessionId }`. Mobile already stores `dpay.devicePushToken`. Then replace the local Coupa demo with register/send. Real Expo tokens need an EAS `projectId` (push only — builds stay on Fastlane) and a signed binary (not Expo Go).
+- **Password reset:** new POC auth endpoint, then the Reset control on `/login` (omitted in Ticket 5 on purpose).
 
----
+Do not invent paths. Ship gateway first, then the mobile wires in the same ticket (or two PRs under this Jira).
 
-### Session WebSocket (optional v1)
-
-**Description**  
-`EXPO_PUBLIC_DPAY_WS_URL` (`…/ws/session`) is documented and unused. Subscribe for SETTLING → SETTLED / FAILED instead of only navigating after settle.
-
-**Dependencies:** Settle ticket. Product: WS vs poll.
-
----
-
-## 3. Backend gaps — create in `dpay.dpay-poc-main` first
-
-Do **not** add guessed paths to `GatewayClient`.
-
-### Consumer Show to Pay QR + refresh
-
-**Description**  
-POC is merchant-presented QR only. Need an endpoint to create/refresh a **customer-presented** display QR + `expiresAt`. Until then Show to Pay stays mocked.
-
-**Blocks:** mobile “Wire Show to Pay to gateway”.
-
----
-
-### Confirmation / receipt DTO
-
-**Description**  
-Either a consumer receipt/order-detail payload or a written decision to reuse settle + transaction/ledger. Confirmation cannot leave the Coupa fixture without this or a complete settle mapping.
-
-**Blocks:** “Confirmation from settle / transaction” if existing shapes are insufficient.
-
----
-
-### Device push register / send
-
-**Description**  
-Register/unregister Expo device token and send a pay-ready payload `{ deepLink, merchantName, sessionId }`. Mobile already persists `dpay.devicePushToken` locally. Demo is a **local** notification.
-
-**Blocks:** mobile “Wire remote push”.
-
----
-
-### Password reset endpoint
-
-**Description**  
-POC has no forgot-password API. Ticket 5 omitted the control on purpose.
-
-**Blocks:** mobile “Reset password UI”.
-
----
-
-## 4. Mobile follow-ups (after gateway tickets)
-
-### Wire Show to Pay to gateway
-
-**Description**  
-Replace `generateMockShowToPay()` with the consumer QR API. Keep 5:00 refresh if the backend returns `expiresAt`.
-
-**Dependencies:** Consumer Show to Pay QR ticket.
-
----
-
-### Wire remote push
-
-**Description**  
-Call register/send instead of SecureStore-only + local Coupa demo. Real Expo push tokens still need an EAS `projectId` (push only — builds stay on Fastlane) and a signed dev/prod binary (not Expo Go).
-
-**Dependencies:** Push register/send + Fastlane iOS build (or a local signed binary).
-
----
-
-### Reset password UI
-
-**Description**  
-Add the Reset control on `/login` once the auth endpoint exists.
-
-**Dependencies:** Password reset endpoint.
+**Dependencies:** DWLLT-3098, DWLLT-3094. Fastlane iOS build (or a local signed binary) for real push tokens.
 
 ---
 
@@ -255,17 +197,9 @@ If Android is v1: Fastlane `gradle` + `supply` (or `upload_to_play_store`) for a
 ```text
 dPay remaining screen polish
 Wire GET /wallet/me on Home
-Settle after scan claim
-Confirmation from settle / transaction
-Transaction history / receipt destination
-Session WebSocket (optional)
-[POC] Consumer Show to Pay QR + refresh
-[POC] Confirmation / receipt DTO
-[POC] Device push register / send
-[POC] Password reset endpoint
-Wire Show to Pay to gateway
-Wire remote push
-Reset password UI
+dPay live pay (settle + confirmation + receipt)
+Show to Pay consumer QR (POC + mobile)
+Push register/send and password reset (POC + mobile)
 Fastlane iOS (match + gym + pilot)
 CI: Fastlane build on GitHub Actions
 CD: TestFlight via Fastlane
