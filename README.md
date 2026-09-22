@@ -1,78 +1,58 @@
-This ticket is the polish pass: Meena puts the missing Personal routes on the sandbox `/v1` map; mobile drops the fallbacks and finishes live Home behavior.
+# Jira ticket (paste into Description)
+
+**Summary:** [UAT] Friday operator build — Chase team findings (Stripe + shared Pay at Stand)
+
+**Type:** Bug (parent) — split the table below into subtasks if needed
+**Priority:** High
+**Components:** Operator App, Payments / Stripe Terminal
+**Environment:** Staging app + prod app noted in UAT; Friday build given to Chase’s team
+**Affects versions:** Friday UAT cut (pre e2e retest)
+**Labels:** `uat` `stripe-terminal` `operator-app`
 
 ---
 
-## Description
+## Summary
 
-Meena confirmed that sandbox `/dwallet/*` and `/dsavings/*` calls land on **offers / DSP / certs** upstream. The app does **not** call `dpay-poc-gateway` or `offers-service` directly; the Offers tab is a no-op.
+Chase’s team UAT on the Friday operator build. Several payment and shared-screen issues on Android and iOS (Pay at Stand and Attendant). This ticket is the punch list from their notes. Fix, then run the e2e plan on a new cut *before* the next UAT handoff. App + backend must ship together for Stripe.
 
-Do not invent a path on mobile until Meena publishes a `/dwallet` equivalent (or documents the Ownership path on `/v1`).
+## Environment
 
----
+* Platform: Android + iOS
+* Surfaces: Valet Pay at Stand, Attendant / event
+* Pathways: Stripe reader, Apple Wallet on reader, keyed / manual CC, cash
+* Also reported (may be pre-existing): SMS, reports time, dent/scratch UI
 
-## Gateway — endpoints for Meena to unlock
+## Findings
 
-### Already called — must work without 403 / “route missing”
+||ID||Area||OS||Steps / what they saw||Expected||Notes||
+|UAT-01|Damage UI|Android|Dent and scratch options are cut off|Full Dent / Scratch labels and buttons usable|`DamageAssessmentModal` — likely layout / safe area, not Stripe. Confirm if Friday-only or older.|
+|UAT-02|Stripe / Apple Wallet|Android|Pay with Apple Wallet via Stripe reader. App shows payment successful. Charge **does not** appear in Stripe Dashboard|Ticket paid **only** if PI `succeeded` on the **lot connected account**. If Stripe did not capture, app must fail closed (not mark paid)|Check they looked at the connected account (not platform) and test vs live. Current app should verify PI before mark-paid. Reproduce on Friday build vs current.|
+|UAT-03|SMS|iOS + Android|Cannot send SMS|SMS sends (or a clear error)|Likely **out of Stripe scope**. Confirm lot SMS / user permission / Twilio. Track separately if confirmed pre-existing.|
+|UAT-04|Stripe reader — Card tap|iOS|Reader connected. Tap green **Card**. Nothing happens|Collect starts (overlay / present card) or a clear “connect reader / TTP” error|Same on Attendant. Reader may be paired but session not ready. iOS TTP / App Store entitlement is a **known separate block** — this report is **reader + Card**.|
+|UAT-05|Stripe reader — Card tap (variant)|iOS|If a message appears, tapping the physical reader beeps “success”|Same as UAT-04 + ticket paid only after verify|Align with UAT-02 / fail-closed.|
+|UAT-06|Cash — freeze|iOS|Complete cash payment → app frozen on that screen. Force quit|Return to ticket / list; ticket paid cash; no Stripe PI|Also reported after entering payment screen for cash **or** card (UAT-09). Pay at Stand + Attendant.|
+|UAT-07|Keyed / manual CC — freeze|iOS|After manual CC entry, app frozen|Success → ticket paid + leave screen, or error and stay unpaid|Stripe.js keyed path. Confirm backend `create_keyed` / `verify_keyed` deployed.|
+|UAT-08|Reports time|iOS + Android|Reports time does not reflect correctly|Start/end times match local lot / operator timezone|Likely **pre-existing**, not Stripe. Split if confirmed.|
+|UAT-09|Payment screen freeze|iOS|After opening payment screen, freeze on cash **or** card. Quit + reopen. Same on Attendant|Can complete cash or card without killing the app|May be the same root cause as UAT-06 / UAT-07 (post-pay navigation / overlay / WebView).|
 
-| Method | Path | Used by | Today |
-|---|---|---|---|
-| `POST` | `/dwallet/auth/signin` | Login | Live (`walletType: "personal"` only) |
-| `GET` | `/user/{id}` | Session | Live |
-| `GET` | `/dwallet/me` | Home “Paying from” + DSA fallback | Live. Keep `planBalances[]` with **per-plan** `balanceUsd`, not only the wallet-level balance |
-| `GET` | `/dwallet/businesses?term=` | My data → Request more data | Often 403 → falls back to the login orbit |
-| `POST` | `/dwallet/data-request` | Submit request | 404/405 → `POST /person/me/data-request` |
-| `GET` | `/dsavings/certificates` | My data → Claim data | Hits certs/DSP. Retries **without** `status=PENDING&role=owner` on 400/404 |
-| `GET` | `/dsavings/data-savings-accounts` | Home + Savings DSA cards | Hits DSP. Retries without `page`/`pageSize` on 400/404/405; failure falls back to `/dwallet/me` plans |
+## Acceptance
 
-Accept query/pagination on `/dsavings/certificates` and `/dsavings/data-savings-accounts` so the client can stop the bare-path retry.
+* Each in-scope item reproduced on current staging app + matching backend, or marked cannot-repro / out of scope with evidence.
+* UAT-02 / UAT-05: no “paid in app, missing in Stripe.” Fail closed if verify fails. PI on connected account.
+* UAT-04 / UAT-05: Card with a connected reader starts collect on iOS (Pay at Stand and Attendant).
+* UAT-06 / UAT-07 / UAT-09: cash and keyed complete without freeze; ticket state matches Stripe/cash.
+* UAT-01 / UAT-03 / UAT-08: fix if this cut caused them; otherwise child tickets, not a UAT blocker for Stripe.
+* New build walks the e2e plan before Chase’s team.
 
-### Missing on the `/v1` map — Claim data is broken without these
+## Out of scope / do not treat as Stripe UAT blockers until confirmed
 
-| Method | Path (or a `/dwallet` equivalent Meena names) | Used by | Today |
-|---|---|---|---|
-| `GET` | `/person/relationships` (fallback: `/proxy/ownership/person/relationships`) | Hide already-decided invitations | 404/405 treated as “no decisions” — decided certs can reappear |
-| `POST` | `/person/relationships` body `{ dWalletId, accepted }` | Claim / dismiss CTA | Route missing — CTA shows a live error |
-| `POST` | `/business/by-dwallet/bulk` (fallback: `/proxy/ownership/business/by-dwallet/bulk`) | Claim card name / logo / color | Ownership path; not on `/v1` |
+* iOS Tap to Pay / Apple Pay on **TestFlight** until Apple enables the App Store TTP entitlement (separate).
+* Full Square / reservation / tips matrix (optional one smoke only).
+* SMS and reports timezone unless this Friday cut changed those screens.
 
-### Home parity with Personal web (Meena to confirm the path)
+## Test notes for the fixer
 
-| Capability | Web today | Mobile today | Ask |
-|---|---|---|---|
-| Live orbit + request list | `GET /api/bff/business/with-data-requests` | Login snapshot (`account.dataRequests` / `relationships`). Ownership search 403s | A sandbox `/dwallet` (or documented) list the app can refetch after login and after a new request |
-| Offers | Personal `PersonalOffersSection` | Placeholder — **no** `offers-service` call | Only if Offers is v1: publish the list path. Do not guess |
-
----
-
-## Mobile — Home improvements after the routes are live
-
-- **Orbit + counters:** refetch live data; do not freeze the login snapshot. Update after Request more data and after Claim/dismiss.
-- **Request more data:** use `GET /dwallet/businesses` as the real catalog; drop the orbit fallback when search returns 200.
-- **Submit:** `POST /dwallet/data-request` only once that path is on `/v1`.
-- **Claim data:** `GET` relationships hides decided certs; `POST` accept/dismiss returns 200 (stay on the tab, remove the card). Load company chrome from the bulk route. Chevron stays visual until a details route exists.
-- **DSA (Home + Savings):** prefer `GET /dsavings/data-savings-accounts`. Keep `/dwallet/me` as fallback only. Never copy `wallet.balanceUsd` onto a plan; omit the amount when there is no per-plan balance.
-- **Offers:** leave the placeholder until Meena publishes the endpoint.
-- **Visual (no new API):** title/subtitle, `StatsRow`, CTAs, orbit, bottom nav vs PdW 18. DWLLT-3169 already covered landing + the Home **header** only.
-
----
-
-## Out of scope
-
-- Live settle / confirmation
-- Show to Pay consumer QR
-- Push register / send
-- Password reset
-- EAS Build
-
-**Dependencies:** DWLLT-3318…3322 (Home tickets 1–5), Claim data follow-up. Gateway first.
-
----
-
-## How to Test
-
-1. Sign in live. Home: “Paying from” comes from `GET /dwallet/me`; the DSA card comes from `GET /dsavings/data-savings-accounts` (no mock catalog).
-2. Request more data: search returns 200 without falling back to the login orbit; submit uses only `/dwallet/data-request`. Home counters and orbit update.
-3. Claim data: certificate list loads; `GET` relationships hides decided items; Claim/dismiss returns 200 and the card disappears.
-4. The Savings tab lists the same cards. When a plan has no `balanceUsd`, the card omits the amount (it does not repeat the wallet balance).
-5. Offers stays a placeholder until Meena publishes the path.
-
----
+* Lot: `payment_gateway = stripe_terminal`, valid `tml_*`, matching Stripe mode.
+* Dashboard: connected account for that lot.
+* After each card: ticket status + PI id + Dashboard.
+* Attach: device + OS, app version, lot, ticket #, pathway, PI id, screenshot.
