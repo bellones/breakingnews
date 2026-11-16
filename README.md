@@ -1,72 +1,58 @@
 # Cache store spike managed results
 
-16 November 2026 · DWLLT-3955
+16 November 2026 · DWLLT-3955 · Evidence cutoff 18:29 UTC
 
-## Decision
+## Current verdict
 
-**Retain PostgreSQL.** The frozen decision rule allows switching to Valkey only if it passes all ten tests and fixes a measured PostgreSQL problem. The real ElastiCache run reached the original expiry stop condition in test 5. The matching PostgreSQL measurements exceeded none of the selected limits. The [decision summary](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/summary.json) verifies that the criteria were frozen before measurement.
+**Retain PostgreSQL as the provisional baseline under the tested configuration. The managed comparison remains incomplete.** Valkey demonstrated working query semantics on the small fixture, leases, isolation and sustained ingestion. Several measured scale queries exceeded the frozen latency limits; expiry correctness and full-memory recovery remain unresolved, and failover acceptance is incomplete. These results concern this prototype and configuration, not an optimized performance limit or a general rejection of Valkey.
 
-This is **one observed stop and nine tests not executed**, not ten failures. The stop legitimately ended the Valkey arm. Store decision evidence is complete. Publication and actual C-ticket updates remain manual; infrastructure destruction is intentionally deferred to the user, and billed cost remains unknown.
+The original rule remains unchanged: switch only if Valkey passes all ten tests and fixes a measured PostgreSQL problem. No selected PostgreSQL screen was exceeded. Later diagnostics cannot retroactively pass the stopped original run or clear its expiry finding.
 
-## Environment and protocol
+## What ran
 
-The run used node-based ElastiCache Valkey **9.0.0**, one primary and one replica on `cache.m7g.large`, TLS and `noeviction`. The authenticated preflight measured **5,140,907,060 bytes** of usable `maxmemory`. Supplementary read-only checks confirmed TLS hostname rejection, an out-of-namespace key denial and a denied synthetic secret ARN. The secret denial jointly exercises IAM and the endpoint, rather than isolating their policies. A command probe was unverified and an alternative-principal fixture was not available; no permissions were expanded. PostgreSQL **17.12** ran in an isolated container on the same ARM64 AWS runner, limited to two CPUs and 4 GiB.
+The original managed run stopped at expiry test 5. At the user's request, a separately frozen continuation investigated the other nine tests through **15 planned cases**: small and scale cases plus two failover phases. **13 cases have completed receipts: eight passed, three failed latency limits and two stopped.** The fourteenth case, mid-fill failover, ran but has an incomplete final safety receipt. The fifteenth, failover after completion, did not run. These are cases, not fifteen different tests. Tests 6, 7 and 9 passed every planned phase.
 
-[SRE PR #2684](https://github.com/reddrummer/sre.infrastructure/pull/2684) supplied the dedicated private Secrets Manager endpoint. The [successful preflight](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/managed-preflight.json) and [frozen run manifest](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/run.json) establish the managed environment; earlier Docker observations were not counted as AWS results.
+The environment was node-based ElastiCache Valkey **9.0.0**, one primary and one replica on cache.m7g.large, TLS and noeviction. The existing PostgreSQL **17.12** measurements used an isolated two-CPU, 4-GiB runner container. The same fixtures, entity/spec identity and numerical criteria were retained. Limits were agent-selected under user delegation and frozen before writes, not team-approved production service levels.
 
-The ten-test protocol and its four guide stop conditions were preserved: impossible required text semantics, unacceptable deep pagination, expired results remaining queryable, and unmanageable full-memory recovery. Numerical limits were selected by the implementing agent under the user's delegation and frozen before this run. They are spike criteria, not team-approved production service levels. No thresholds were adjusted after observing results.
+The continuation reused the original PostgreSQL results as immutable semantic references. It did not rerun PostgreSQL performance. See the [diagnostic report](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/DIAGNOSTIC-RESULTS.md) and [extracted measurements](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/recorded-diagnostic-metrics.md).
 
-## Expiry finding
+## Ten-test disposition
 
-The 35-row lifecycle fixture ran two TTL probes. The first passed. In the second, the server clock was approximately **50 ms past the common expiry before querying**, and 51 ms past afterward. The search exact total was **1**, while the returned page contained **zero rows**. Subsequent checks found all four relevant document/control keys absent. Index document counts were two before those existence checks and zero afterward.
+1. **Operators and NULL behavior:** 24 small-fixture query cases passed. At 100,000 rows, the range query matched IDs/order and total **47,059**, but p95 was **392.563 ms against 250 ms**.
+2. **Literal contains and search:** 52 small-fixture cases passed. The scale accent-contains query matched IDs/order and total **11,428**, but p95 was **1,204.965 ms against 500 ms**.
+3. **Sorting:** eight small-fixture cases passed. The scale numeric-sort query matched IDs/order and total **100,000**, but p95 was **1,200.244 ms against 250 ms**.
+4. **Pagination and exact totals:** stopped on the first, offset-zero query: p95 **1,207.895 ms against 1,000 ms**, with matching IDs/order and total **94,117**. Offsets 50,000 and 99,900 were not reached.
+5. **Expiry and index lifecycle:** the original managed expiry stop remains. After server-confirmed expiry, the exact total was **one**, but the page was **empty**. Later checks found four relevant keys absent. **No expired row was returned.** Internal cause remains unproven; the remaining index-lifecycle checks were not reached.
+6. **Leases and failure windows:** passed on both fixtures. Two racing clients produced one owner; heartbeat, takeover, stale-owner mutation rejection and failure-window reopening were observed.
+7. **Fill and visibility:** passed three complete 100,000-row fills, detailed below.
+8. **Memory and noeviction recovery:** entered the scenario, then stopped at a compound cleanup/refusal/state assertion. The failing subcondition and recovery timing were not serialized; this does not establish an unmanageable AWS memory failure.
+9. **Caller isolation:** passed on both fixtures. Overlapping IDs and the same source hash remained independent; the unscoped negative control matched two other-caller documents while the scoped query matched none.
+10. **Failover:** mid-fill was attempted but acceptance is incomplete; after-completion was not attempted.
 
-Expired data therefore contributed to an exact total and triggered the frozen expiry criterion. **No expired row was returned in the recorded page.** The internal cause and which operation changed index state are unproven. The observation does not establish that entries persisted for two seconds or indefinitely. A separate count-before-expiry/page-after-expiry boundary observation was retained as context and was not the stop reason.
+Each failed scale query above retained **100 measured samples** after ten warmups. Its matching rows do not imply that later queries in the same method ran. The 84 small-fixture semantic passes are separate from scale coverage.
 
-The [independent verification](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/expiry-verification.md) checked both recorded probes against the raw result, server times, commands and frozen criteria; it did not rerun the experiment. See the [raw lifecycle evidence](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/valkey-lifecycle-1.json).
+## Fill and memory observations
 
-## Ten-test coverage
+The three concurrent-read fills took **42.732, 42.508 and 43.285 seconds**, delivering **2,310–2,353 rows/second**, within the frozen minimum 2,000 rows/second and maximum 50 seconds. All acknowledged and immediately exposed 100,000 rows; observed counts progressed monotonically. Concurrent count-query p95 ranged **27.385–28.606 ms**. This narrower query workload does not contradict the slower filter/sort measurements above.
 
-1. Operator, NULL, NOT, array and enum parity — not executed.
-2. Literal contains and text/search semantics — not executed.
-3. Sorting, null placement and deterministic ties — not executed.
-4. Deep pagination and exact totals — not executed.
-5. Expiry and entity/spec index lifecycle — **stopped on the second TTL probe**; remaining lifecycle checks were not reached.
-6. Leases, fencing and failure windows — not executed.
-7. Fill throughput, immediate visibility and concurrent reads — not executed.
-8. Complete-set memory and real noeviction OOM recovery — not executed.
-9. Caller isolation — not executed.
-10. Managed failover and complete-set integrity — not executed.
+The complete 100,000-row setup for test 8 increased server allocation by **891,741,792 bytes, or 850.431 MiB**, over its empty-index baseline, below the 1,536 MiB screen. This includes document/index and store overhead; it is not required resident RAM or production sizing proof. The setup allocation is not a passing OOM-recovery result.
 
-The 100,000-row Valkey phase did not run. Complete-set sizing, production node requirements, failover behavior and OOM recovery remain unmeasured; neither this small fixture nor historical local OOM data supplies those results.
+## Failover limits and cleanup
 
-## Matching PostgreSQL measurements
+One AWS TestFailover request was accepted. The observer did not establish primary promotion and readable-fixture recovery within its 30-second criterion. A later replacement wait also timed out, and its retained history is incomplete; event-history reconciliation remains unavailable. This does **not** prove a 30-second service outage, a ten-minute AWS outage or data loss.
 
-The fresh baseline completed five 100,000-row fill/delete-and-vacuum cycles, **6,000 measured query operations** and 600 warmups. Each operation included its page and exact total. The separate 35-row PostgreSQL oracle exercised 84 cases; these are not Valkey parity passes.
+Immediate failover-fixture cleanup still counted 52 indexed rows. Subsequent global namespace cleanup removed **100,004 owned keys and the created index**, leaving none. At **18:29:28 UTC**, the [postflight](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/postflight.json) recorded a healthy group with the primary changed from node 001 to 002. Those later observations do not establish recovery latency or pass the missing second phase. See the [raw failover attempt](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/diagnostics/s10-mid/raw.json).
 
-- Complete ingestion took **2.099–2.374 seconds**, or **42,118–47,632 rows/second**.
-- Maximum query p95 was **132.447 ms**, at offset 99,900. Maximum text/search p95 was **75.907 ms**.
-- Maximum live-set ordinary vacuum was **222.350 ms**. Retained heap/index size grew **1.0912×** between equal live sets after vacuum.
-- Initial disk growth was **143.367 MiB**; final retained growth was **156.484 MiB**. These footprints do not establish required RAM.
-- Database counters recorded **6.494 GiB** of temporary data. The separate host window recorded **799.543 MiB** of device writes. These are different measurements and cannot be added or treated as billable IO requests.
+## PostgreSQL reference and remaining work
 
-No selected PostgreSQL limit was exceeded. This synthetic warm-cache experiment has five cycles within one run, not five independent replications or production capacity proof. The [measurement report](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/postgres-measurement-summary.md) explains the sampling and IO scope.
+The original five 100,000-row cycles measured fills **2.099–2.374 seconds**, maximum query p95 **132.447 ms**, maximum ordinary vacuum **222.350 ms**, and retained heap/index growth **1.0912×**. Disk growth was **143.367 MiB initially and 156.484 MiB retained**. This synthetic warm-cache run is reference context, not a fresh paired comparison with the continuation. [PostgreSQL measurement scope](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/postgres-measurement-summary.md).
+
+Separate probes for the missing deep offsets, obsolete-index collection and individual OOM-recovery conditions are prepared but **not executed at this cutoff**, pending reconciliation. They cannot replace the original expiry result.
 
 ## Costs and publication
 
-[Cost Explorer access was denied](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/cost-explorer-attempt-observation.json), so the actual AWS bill is unknown. The [updated runtime cost model](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/cost-update.md) estimates approximately **$23.34** for the observed core interval through 14:31 UTC, including node/endpoint hourly rounding. This excludes later runtime and ancillary services; it is not a final total. Published unit rates and runtime illustrations remain estimates with service-specific exclusions. Valkey production cost per complete set cannot be calculated from this stopped run. See the [pricing qualifications](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/pricing-notes.md).
+The [updated cost model](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/cost-addendum.md) estimates **$24.73 of core infrastructure through 18:29 UTC**, assuming continuous availability and using the previously recorded creation times and dated rates. This is a limited scenario, not a bill or final total; ancillary services and later runtime are excluded. The measured complete-set allocation is now a capacity input, but production cost per set remains unvalidated. Cost Explorer access was denied; billed cost is unknown.
 
-The [full-plan decision entry](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/full-plan-decision-log-update.md) and [C-ticket handoff](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/c-tickets-update.md) are **unpublished manual drafts**. Publish the reviewed PostgreSQL decision on the spike page and full-plan decision log, then confirm or rewrite the actual store-specific C tickets. Their identifiers were not supplied; no remote update or invented ticket confirmation is claimed.
+The [decision-log entry](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/full-plan-decision-log-update.md) and [C-ticket handoff](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-d1/c-tickets-update.md) are prepared for manual review/publication; no remote Confluence or C-ticket update is claimed. Actual C-ticket IDs remain unknown. AWS infrastructure remains provisioned at the user's request. Teardown is deferred; the recorded deadline is **18 November, 14:00 UTC / 11:00 Fortaleza**. Namespace cleanup does not establish infrastructure removal.
 
-## Evidence export and deferred infrastructure teardown
-
-The complete disposable bucket was copied outside AWS: **19 objects**, **63,454,794 bytes**, stable before/after metadata, verified source/run archive hashes and verified individual frozen dataset hashes. The [permanent export receipt](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/permanent-bucket-export.json) identifies the Desktop destination. The compressed 100,000-row input remains there, avoiding a 62 MB generated file in Git.
-
-Harness cleanup is complete: **40 owned Valkey keys, both created indexes, PostgreSQL schemas, containers, anonymous volumes and the introduced 497 MB PostgreSQL image were removed**. [Cleanup receipt](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/measurement-job-result.json).
-
-**AWS infrastructure destruction is deferred at the user's explicit request.** The user will execute the prepared **draft** [SRE teardown PR #2685](https://github.com/reddrummer/sre.infrastructure/pull/2685) later. A destroy plan was requested; no destroy apply was requested or performed by this run. Resources are intentionally retained and continue to accrue applicable charges. The last cost estimate above ends at its observation time and does not cover this later runtime.
-
-The [handoff receipt](https://github.com/reddrummer/dwallet.filter-engine-monorepo/blob/4551f69916a3f2cb497e28d3ba2ad27ac4b2bae4/tools/cache-store-spike/evidence/dwllt3955-aws-20261116-r1/aws-infrastructure-teardown.json) records the deferral, verified export and exact unit. The closure inventory contains 20 identities. Profile/role/EC2 relationships corroborate the instance-profile identity; direct `GetInstanceProfile` remains denied. Keep that limitation visible during later absence verification and preserve the frozen manifest. No AWS absence or completed ticket closure is claimed.
-
-Before the later apply, refresh and review the destroy plan for this unit only. Preserve the shared VPC, subnet group, old Secrets Manager endpoint/security group and private DNS. After destruction, check each saved resource identity independently, then retire the unit configuration.
-
-The recorded deadline remains **18 November 2026, 14:00 UTC / 11:00 Fortaleza**. There is no automatic deletion. Full-plan publication, actual C-ticket updates and the user-run infrastructure teardown remain separate closure steps.
+Report and evidence snapshot: [commit c85d373](https://github.com/reddrummer/dwallet.filter-engine-monorepo/commit/c85d37305cf5d60ecc794864dee1f5e25f3ffb0d).
